@@ -25,13 +25,20 @@ function RegisterInner() {
   function loadMe() {
     api<{ me: { registration?: { status: string; tx_hash?: string | null } } | null }>("/api/me").then((r) => {
       setMe(r.me);
-      if (r.me?.registration?.status === "ACTIVE") router.replace("/dashboard");
+      if (r.me?.registration?.status === "ACTIVE") router.replace("/plans");
     });
   }
 
   useEffect(() => {
     loadMe();
   }, []);
+
+  useEffect(() => {
+    if (me === "loading" || !me?.registration || me.registration.status === "ACTIVE") return;
+    if (me.registration.status !== "PENDING") return;
+    const timer = setInterval(loadMe, 2000);
+    return () => clearInterval(timer);
+  }, [me === "loading" ? "loading" : me?.registration?.status]);
 
   if (me === "loading") return <p className="p-10 text-mute">Loading…</p>;
 
@@ -42,7 +49,7 @@ function RegisterInner() {
         <RegistrationPayCard
           status={me.registration?.status ?? "NOT_PAID"}
           txHash={me.registration?.tx_hash}
-          onActive={() => router.replace("/dashboard")}
+          onActive={() => router.replace("/plans")}
         />
       </main>
     );

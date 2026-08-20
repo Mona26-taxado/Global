@@ -106,7 +106,7 @@ function extractSendHash(raw: unknown): `0x${string}` {
   throw new Error("Wallet did not return a transaction hash.");
 }
 
-export function usePay() {
+export function usePay(resume?: { txHash?: string | null; paymentType?: string }) {
   const [phase, setPhase] = useState<PayPhase>("IDLE");
   const [error, setError] = useState("");
   const [txHash, setTxHash] = useState("");
@@ -172,8 +172,8 @@ export function usePay() {
   }
 
   useEffect(() => {
-    const savedHash = localStorage.getItem(PAY_HASH_KEY);
-    const savedType = localStorage.getItem(PAY_TYPE_KEY);
+    const savedHash = localStorage.getItem(PAY_HASH_KEY) || resume?.txHash || "";
+    const savedType = localStorage.getItem(PAY_TYPE_KEY) || resume?.paymentType || "REGISTRATION";
     if (savedHash && savedType && isHash(savedHash)) {
       setTxHash(savedHash);
       setPhase("PENDING");
@@ -208,14 +208,14 @@ export function usePay() {
 
   async function confirmOnServer(paymentType: string, hash: string) {
     // IMPORTANT: Registration/plan become ACTIVE only after server-side chain verification.
-    for (let i = 0; i < 24; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const confirmed = await api<{ code?: string }>("/api/payments/confirm", {
         method: "POST",
         body: JSON.stringify({ paymentType, txHash: hash }),
       });
       if (confirmed.code === "PENDING" || (confirmed.error && /not mined|not readable|RPC|authenticated/i.test(confirmed.error))) {
         setPhase("PENDING");
-        await new Promise((r) => setTimeout(r, 4000));
+        await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
       if (!confirmed.ok) {

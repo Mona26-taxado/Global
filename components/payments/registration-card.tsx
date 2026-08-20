@@ -19,14 +19,14 @@ export function RegistrationPayCard({
   txHash?: string | null;
   onActive?: () => void;
 }) {
-  const pay = usePay();
+  const pay = usePay({ txHash, paymentType: "REGISTRATION" });
   const [cfg, setCfg] = useState<Cfg | null>(null);
   useEffect(() => {
     api<{ config: Cfg }>("/api/config").then((r) => setCfg(r.config));
   }, []);
   useEffect(() => {
-    if (pay.phase === "CONFIRMED") onActive?.();
-  }, [pay.phase, onActive]);
+    if (status === "ACTIVE" || pay.phase === "CONFIRMED") onActive?.();
+  }, [status, pay.phase, onActive]);
 
   const uiStatus =
     status === "ACTIVE"
@@ -58,7 +58,7 @@ export function RegistrationPayCard({
           {configAlert.detail}
         </Alert>
       )}
-      {status !== "ACTIVE" && (
+      {status !== "ACTIVE" && status !== "PENDING" && pay.phase !== "PENDING" && pay.phase !== "SUBMITTED" && (
         <Button
           className="mt-6 w-full"
           disabled={pay.phase === "WALLET_CONFIRMATION" || cfg?.usdtConfigured === false}

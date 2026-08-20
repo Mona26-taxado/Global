@@ -6,7 +6,7 @@ export function payNotice(phase: string, error?: string) {
     return { title: "Payment confirmed", detail: "Your payment is verified on Polygon.", tone: "success" as AlertTone };
   }
   if (phase === "PENDING" || phase === "SUBMITTED") {
-    return { title: "Confirming payment", detail: "Keep this page open while Polygon confirms the transaction.", tone: "info" as AlertTone };
+    return { title: "Confirming payment", detail: "Almost done. You will open Plans as soon as Polygon confirms this payment.", tone: "info" as AlertTone };
   }
   if (phase === "WALLET_CONFIRMATION") {
     return { title: "Confirm in your wallet", detail: "Approve the payment in TokenPocket or Trust Wallet. Connecting never sends funds — only Pay does.", tone: "info" as AlertTone };
