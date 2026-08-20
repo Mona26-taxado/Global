@@ -1,19 +1,20 @@
 import type { ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AlertTone } from "@/lib/user-errors";
 
 const styles: Record<AlertTone, string> = {
-  error: "border-danger/40 bg-danger/10 text-rose-100",
-  success: "border-mint/40 bg-mint/10 text-emerald-100",
-  warning: "border-amber-400/40 bg-amber-400/10 text-amber-50",
-  info: "border-electric/40 bg-electric/10 text-sky-100",
+  error: "border-danger/30 bg-danger/10 text-cream",
+  success: "border-mint/30 bg-mint/10 text-cream",
+  warning: "border-warning/30 bg-warning/10 text-cream",
+  info: "border-info/30 bg-info/10 text-cream",
 };
 
-const labels: Record<AlertTone, string> = {
-  error: "Error",
-  success: "Success",
-  warning: "Please check",
-  info: "In progress",
+const icons: Record<AlertTone, typeof Info> = {
+  error: XCircle,
+  success: CheckCircle2,
+  warning: AlertTriangle,
+  info: Info,
 };
 
 export function Alert({
@@ -27,11 +28,14 @@ export function Alert({
   children?: ReactNode;
   className?: string;
 }) {
+  const Icon = icons[tone];
   return (
-    <div className={cn("rounded-2xl border px-4 py-3 text-sm leading-relaxed", styles[tone], className)} role="status">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-80">{labels[tone]}</p>
-      {title && <p className="mt-1 font-semibold text-white">{title}</p>}
-      {children && <div className={cn("text-[13px] text-slate-200", title ? "mt-1" : "mt-0.5")}>{children}</div>}
+    <div className={cn("flex gap-3 rounded-card border px-4 py-3 text-sm leading-6", styles[tone], className)} role="status">
+      <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+      <div className="min-w-0">
+        {title && <p className="font-semibold text-cream">{title}</p>}
+        {children && <div className={cn("text-[13px] text-secondary", title ? "mt-0.5" : "")}>{children}</div>}
+      </div>
     </div>
   );
 }

@@ -5,16 +5,18 @@
 html,
 body {
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
-  @apply bg-ink text-slate-100 antialiased;
-  background-image:
-    radial-gradient(1000px 500px at 10% -10%, rgba(124, 92, 255, 0.22), transparent 55%),
-    radial-gradient(800px 400px at 100% 0%, rgba(59, 130, 246, 0.16), transparent 50%),
-    linear-gradient(180deg, #04060f, #070b18 40%, #04060f);
+  @apply bg-ink text-cream antialiased;
+  background-image: radial-gradient(900px 420px at 12% -8%, rgba(124, 92, 255, 0.12), transparent 55%);
 }
 
 a {
-  @apply text-blue-300 underline-offset-4 hover:text-white;
+  @apply text-info underline-offset-4 hover:text-cream;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

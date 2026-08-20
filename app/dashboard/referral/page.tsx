@@ -1,66 +1,62 @@
 "use client";
 
+import { Users } from "lucide-react";
 import { DashShell, useMe } from "@/components/dash-shell";
 import { Button } from "@/components/ui/button";
-import { Badge, Card } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { CopyButton, EmptyState, PageHeader, StatCard, StatusBadge, WalletAddress } from "@/components/ui/app-ui";
 import { shortAddr } from "@/lib/utils";
-import { useState } from "react";
 
 export default function ReferralPage() {
   const me = useMe();
-  const [copied, setCopied] = useState(false);
   const rows = me?.referrals ?? [];
+  const directs = me?.directs ?? 0;
+  const full = directs >= 2;
+
   return (
     <DashShell title="Referral">
-      <p className="mt-2 text-sm text-mute">Share your link. New members keep you as sponsor. This cannot be changed later.</p>
+      <PageHeader
+        kicker="Referral"
+        title="Your Referral Link"
+        description="Share your link. New members keep you as sponsor. This cannot be changed later."
+      />
       <Card className="mt-6 p-5 sm:p-6">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-mute">Your code</div>
-        <div className="mt-2 font-display text-3xl sm:text-4xl">{me?.referral_code}</div>
-        <p className="mt-3 break-all text-xs text-mute sm:text-sm">{me?.referral_link}</p>
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <Button
-            variant="ghost"
-            className="w-full sm:w-auto"
-            onClick={() => {
-              if (!me?.referral_link) return;
-              navigator.clipboard.writeText(me.referral_link);
-              setCopied(true);
-            }}
-          >
-            {copied ? "Copied" : "Copy link"}
-          </Button>
-          {me?.referral_link && (
-            <a className="no-underline" href={`https://wa.me/?text=${encodeURIComponent(me.referral_link)}`} target="_blank" rel="noreferrer">
-              <Button variant="ghost" className="w-full sm:w-auto">
-                Share on WhatsApp
-              </Button>
-            </a>
-          )}
+        <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Referral code</p>
+        <p className="mt-2 font-display text-3xl sm:text-4xl">{me?.referral_code}</p>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            readOnly
+            value={me?.referral_link ?? ""}
+            className="min-h-12 min-w-0 flex-1 truncate rounded-xl border border-line bg-elevated px-4 text-sm text-cream"
+          />
+          {me?.referral_link && <CopyButton value={me.referral_link} label="Copy Link" />}
         </div>
-        <div className="mt-6 grid grid-cols-3 gap-2 text-center">
-          {[
-            ["Direct", me?.directs ?? 0],
-            ["Active", me?.active_referrals ?? 0],
-            ["Total", me?.total_referrals ?? 0],
-          ].map(([k, v]) => (
-            <div key={String(k)} className="rounded-2xl bg-white/5 py-3">
-              <div className="text-[10px] uppercase tracking-wider text-mute">{k}</div>
-              <div className="font-display text-2xl">{v}</div>
-            </div>
-          ))}
-        </div>
+        {full && <p className="mt-4 text-sm text-warning">Direct referral slots are full.</p>}
       </Card>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard label="Direct Referrals" value={String(directs)} />
+        <StatCard label="Active referrals" value={String(me?.active_referrals ?? 0)} />
+        <StatCard label="Total network" value={String(me?.total_referrals ?? 0)} />
+      </div>
+
       <div className="mt-6 space-y-3">
         {rows.length === 0 && (
-          <Card className="p-5 text-sm text-mute">No referrals yet. Counts include live members only.</Card>
+          <EmptyState
+            icon={Users}
+            title="No referrals yet."
+            detail="Share your referral link to invite your first member."
+            action={me?.referral_link ? <CopyButton value={me.referral_link} label="Copy Referral Link" /> : undefined}
+          />
         )}
-        {rows.map((r) => (
-          <Card key={r.id} className="flex flex-wrap items-center justify-between gap-2 p-4">
-            <div>
-              <p className="font-mono text-xs text-white">{shortAddr(r.wallet)}</p>
+        {rows.map((r, i) => (
+          <Card key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">Direct {i + 1}</p>
+              <p className="mt-1 font-mono text-xs text-secondary">{shortAddr(r.wallet)}</p>
               <p className="mt-1 text-[11px] text-mute">{new Date(r.joined).toLocaleDateString()}</p>
             </div>
-            <Badge tone={r.registration_status === "ACTIVE" ? "mint" : "mute"}>{r.registration_status}</Badge>
+            <StatusBadge status={r.registration_status} />
           </Card>
         ))}
       </div>

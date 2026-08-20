@@ -11,10 +11,11 @@ type Node = {
   parent_id: string | null;
   position: string | null;
   depth: number;
+  cycle?: number;
   user?: { referral_code: string; display_name: string; is_demo: boolean };
 };
 
-export function NetworkCanvas() {
+export function NetworkCanvas({ highlightUserId }: { highlightUserId?: string }) {
   const [tree, setTree] = useState<Node[]>([]);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Node | null>(null);
@@ -42,7 +43,7 @@ export function NetworkCanvas() {
     <div>
       <Badge tone="mute">DEMO DATA · Prototype Business Logic — Configurable</Badge>
       <input
-        className="mt-4 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm"
+        className="mt-4 w-full min-h-12 rounded-xl border border-line bg-elevated px-4 text-sm"
         placeholder="Search referral code"
         value={q}
         onChange={(e) => setQ(e.target.value)}
@@ -57,13 +58,17 @@ export function NetworkCanvas() {
                     <button
                       key={n.id}
                       onClick={() => setSel(n)}
-                      className={`rounded-xl border px-3 py-2 text-xs ${
-                        n.user?.is_demo ? "border-white/10 text-mute" : "border-violet/40 text-white"
-                      } ${sel?.id === n.id ? "bg-violet/20" : "bg-black/30"}`}
+                      className={`min-h-11 rounded-xl border px-3 py-2 text-xs ${
+                        n.user_id === highlightUserId
+                          ? "border-mint bg-mint/15 text-cream"
+                          : n.user?.is_demo
+                            ? "border-line text-mute"
+                            : "border-violet/40 text-cream"
+                      } ${sel?.id === n.id ? "bg-violet/20" : "bg-elevated"}`}
                     >
                       {n.user?.referral_code ?? n.user_id.slice(0, 8)}
                       <div className="text-[10px] uppercase text-mute">
-                        {n.position ?? "ROOT"} · L{n.depth}
+                        {n.position ?? "ROOT"} · C{n.cycle ?? Math.floor(n.depth / 2)}
                       </div>
                     </button>
                   ))}

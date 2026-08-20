@@ -2,22 +2,27 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Copy, Layers, Network, Share2, Wallet } from "lucide-react";
 import { DashShell, useMe } from "@/components/dash-shell";
-import { Badge, Card } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
-import { api, shortAddr } from "@/lib/utils";
-
-function statusTone(status: string): "mint" | "danger" | "violet" | "mute" {
-  if (status === "ACTIVE") return "mint";
-  if (status === "FAILED") return "danger";
-  if (status === "PENDING") return "violet";
-  return "mute";
-}
+import { PageHeader, StatCard, StatusBadge, WalletAddress } from "@/components/ui/app-ui";
+import { api } from "@/lib/utils";
 
 export default function DashboardPage() {
   const me = useMe();
   const [bal, setBal] = useState<{ pol: string; usdt: string; usdtConfigured?: boolean } | null>(null);
+  const [chainName, setChainName] = useState("Polygon");
+  const [position, setPosition] = useState<string | null>(null);
+  const [cycle, setCycle] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ config: { chainName: string } }>("/api/config").then((r) => {
+      if (r.config?.chainName) setChainName(r.config.chainName);
+    });
+  }, []);
+
   useEffect(() => {
     if (!me?.address) return;
     api<{ pol: string; usdt: string; usdtConfigured?: boolean }>(`/api/wallet/balances?address=${me.address}`).then((r) => {
@@ -25,80 +30,138 @@ export default function DashboardPage() {
     });
   }, [me?.address]);
 
+  useEffect(() => {
+    if (!me?.id) return;
+    api<{ tree: { user_id: string; position: string | null; depth: number; cycle?: number }[] }>("/api/network").then((r) => {
+      const node = (r.tree ?? []).find((n) => n.user_id === me.id);
+      setPosition(node?.position ?? null);
+      setCycle(node ? String(node.cycle ?? Math.floor(node.depth / 2)) : null);
+    });
+  }, [me?.id]);
+
   const reg = me?.registration?.status ?? "NOT_PAID";
+  const txs = (me?.transactions as { payment_type?: string; plan_code?: string; status: string; created_at: string }[] | undefined) ?? [];
 
   return (
     <DashShell title="Overview">
-      <p className="mt-2 max-w-xl text-sm text-mute">Your membership, wallet, and referrals in one place.</p>
+      <PageHeader
+        kicker="Overview"
+        title={`Welcome`}
+        description="Your membership, wallet, and referrals in one place."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={reg} />
+            <span className="text-xs text-mute">{chainName}</span>
+          </div>
+        }
+      />
+      <p className="mt-2 text-sm text-secondary">
+        <WalletAddress address={me?.address} />
+      </p>
 
       {reg !== "ACTIVE" && (
         <Alert className="mt-5" tone="warning" title="Complete registration">
-          Pay the $5 USDT fee to unlock plans and your live referral link.
+          Pay the registration fee to unlock plans and your live referral link.
           <div className="mt-3">
-            <Button asChild className="!py-2 text-xs">
+            <Button asChild className="!text-xs">
               <Link href="/register" className="no-underline">
-                Pay $5 now
+                Continue registration
               </Link>
             </Button>
           </div>
         </Alert>
       )}
 
-      <Card className="mt-6 overflow-hidden p-0">
-        <div className="bg-gradient-to-r from-violet/20 to-electric/10 p-5 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.2em] text-mute">Signed in</p>
-              <p className="mt-1 font-mono text-sm text-white sm:text-base">{shortAddr(me?.address)}</p>
-              <p className="mt-1 text-xs capitalize text-mute">{me?.wallet_type ?? "Wallet"} · Polygon</p>
-            </div>
-            <Badge tone={statusTone(reg)}>{reg.replaceAll("_", " ")}</Badge>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-px bg-white/10 sm:grid-cols-4">
-          {[
-            ["USDT", bal?.usdtConfigured === false ? "—" : (bal?.usdt ?? "…")],
-            ["POL", bal?.pol ?? "…"],
-            ["Plan", me?.plans?.[0] ?? "None"],
-            ["Directs", String(me?.directs ?? 0)],
-          ].map(([k, v]) => (
-            <div key={k} className="bg-[#0c1228] p-4">
-              <div className="text-[11px] uppercase tracking-[0.16em] text-mute">{k}</div>
-              <div className="mt-1 truncate font-display text-lg sm:text-xl">{v}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <StatCard label="Membership Status" value={<StatusBadge status={reg} />} />
+        <StatCard label="Current Plan" value={me?.plans?.[0] ?? "—"} />
+        <StatCard label="Direct Referrals" value={String(me?.directs ?? 0)} />
+        <StatCard label="Global Position" value={position ?? "—"} hint={!position ? "Shown when placed in Global" : undefined} />
+        <StatCard label="Cycle" value={cycle ?? "—"} />
+      </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <Card className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-mute">Referral code</p>
-          <p className="mt-2 font-display text-2xl">{me?.referral_code ?? "—"}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button asChild variant="ghost" className="!py-2 text-xs">
-              <Link href="/dashboard/referral" className="no-underline">
-                Share invite
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
+        <Card className="p-5 sm:p-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Network Overview</p>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-line bg-elevated p-4">
+              <p className="text-xs text-mute">Active referrals</p>
+              <p className="mt-1 font-display text-2xl tabular">{me?.active_referrals ?? 0}</p>
+            </div>
+            <div className="rounded-xl border border-line bg-elevated p-4">
+              <p className="text-xs text-mute">Total network</p>
+              <p className="mt-1 font-display text-2xl tabular">{me?.total_referrals ?? 0}</p>
+            </div>
+          </div>
+          <Button asChild variant="ghost" className="mt-4">
+            <Link href="/dashboard/network" className="no-underline">
+              <Network className="h-4 w-4" />
+              View Network
+            </Link>
+          </Button>
+        </Card>
+        <Card className="p-5 sm:p-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Wallet</p>
+          <p className="mt-3 text-sm capitalize text-secondary">{me?.wallet_type ?? "Wallet"}</p>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-mute">POL</p>
+              <p className="font-display text-xl tabular">{bal?.pol ?? "…"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-mute">{bal?.usdtConfigured === false ? "Token" : "Balance"}</p>
+              <p className="font-display text-xl tabular">{bal?.usdtConfigured === false ? "—" : (bal?.usdt ?? "…")}</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Card className="p-5 sm:p-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Quick Actions</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <Button asChild variant="ghost">
+              <Link href="/plans" className="no-underline">
+                <Layers className="h-4 w-4" />
+                View Plans
               </Link>
             </Button>
-            <Button asChild variant="ghost" className="!py-2 text-xs">
-              <Link href="/plans" className="no-underline">
-                View plans
+            <Button
+              variant="ghost"
+              onClick={() => me?.referral_link && navigator.clipboard.writeText(me.referral_link)}
+            >
+              <Copy className="h-4 w-4" />
+              Copy Referral Link
+            </Button>
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/network" className="no-underline">
+                <Network className="h-4 w-4" />
+                View Network
+              </Link>
+            </Button>
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/wallet" className="no-underline">
+                <Wallet className="h-4 w-4" />
+                Wallet
               </Link>
             </Button>
           </div>
         </Card>
-        <Card className="p-5">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-mute">Team</p>
-          <p className="mt-2 text-sm text-mute">Active referrals are members who completed $5 registration.</p>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs text-mute">Active</p>
-              <p className="font-display text-2xl">{me?.active_referrals ?? 0}</p>
-            </div>
-            <div>
-              <p className="text-xs text-mute">Total</p>
-              <p className="font-display text-2xl">{me?.total_referrals ?? 0}</p>
-            </div>
+        <Card className="p-5 sm:p-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Recent Activity</p>
+          <div className="mt-4 space-y-3">
+            {txs.slice(0, 4).map((t) => (
+              <div key={t.created_at + (t.plan_code ?? "")} className="flex items-center justify-between gap-3">
+                <span className="truncate text-sm">{t.payment_type ?? t.plan_code}</span>
+                <StatusBadge status={t.status} />
+              </div>
+            ))}
+            {txs.length === 0 && <p className="text-sm text-mute">No activity yet.</p>}
+            <Button asChild variant="ghost" className="mt-2">
+              <Link href="/dashboard/transactions" className="no-underline">
+                View activity
+              </Link>
+            </Button>
           </div>
         </Card>
       </div>
