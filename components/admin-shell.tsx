@@ -83,11 +83,11 @@ export function AdminShell({
 
   useEffect(() => {
     api("/api/admin/stats").then((r) => {
-      if (!r.ok) router.replace("/admin");
-      else setOk(true);
+      if (r.ok) setOk(true);
+      else if (pathname !== "/admin") router.replace("/admin");
     });
     api<{ config: { testnet: boolean } }>("/api/config").then((r) => setTestnet(r.config?.testnet === true));
-  }, [router]);
+  }, [router, pathname]);
 
   if (!ok) {
     return (
@@ -111,15 +111,15 @@ export function AdminShell({
 
   return (
     <div className="min-h-screen lg:flex">
-      <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 flex-col border-r border-line bg-surface px-4 py-5 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[260px] flex-col overflow-hidden border-r border-line bg-surface px-4 py-5 lg:flex">
         {brand}
-        <div className="mt-8 flex-1 overflow-y-auto pr-1">
+        <div className="mt-8 min-h-0 flex-1 overflow-y-auto pr-1">
           <NavLinks pathname={pathname} />
         </div>
         <p className="px-3 pt-4 text-[11px] text-mute">Username / password only</p>
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 lg:pl-[260px]">
         <header className="sticky top-0 z-30 border-b border-line bg-ink/75 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3 lg:hidden">{brand}</div>

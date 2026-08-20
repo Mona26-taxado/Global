@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   ArrowUpRight,
   BadgeCheck,
@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/ui/app-ui";
-import { fieldClass, formatTokenAmount, Meter } from "@/components/ui/data-list";
+import { fieldClass, formatTokenAmount, Meter, BarChart, StatusBars } from "@/components/ui/data-list";
 import { friendlyMessage } from "@/lib/user-errors";
 
 type Stats = Record<string, number>;
@@ -34,7 +34,7 @@ type Tx = { tx_hash: string; payment_type: string; amount: string; token: string
 type UserRow = { id: string; wallet?: string; registration_status?: string; current_plan?: string | null; created_at?: string };
 
 export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
+  const [session, setSession] = useState<"checking" | "guest" | "in">("checking");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [stats, setStats] = useState<Stats | null>(null);
@@ -45,16 +45,17 @@ export default function AdminPage() {
   async function load() {
     const s = await api<{ stats: Stats }>("/api/admin/stats");
     if (!s.ok) {
-      setAuthed(false);
+      setSession("guest");
       return;
     }
-    setAuthed(true);
+    setSession("in");
     setStats(s.stats);
     const [t, u] = await Promise.all([
       api<{ rows: Tx[] }>("/api/admin/data?resource=transactions"),
       api<{ rows: UserRow[] }>("/api/admin/data?resource=users"),
     ]);
-    setTxs([...(t.rows ?? [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 6));
+    const sorted = [...(t.rows ?? [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    setTxs(sorted);
     setUsers([...(u.rows ?? [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 6));
   }
 
@@ -62,7 +63,30 @@ export default function AdminPage() {
     void load();
   }, []);
 
-  if (!authed) {
+  const byDay = useMemo(() => {
+    const days: { label: string; value: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({
+        label: `${d.getDate()}/${d.getMonth() + 1}`,
+        value: txs.filter((t) => String(t.created_at).slice(0, 10) === key).length,
+      });
+    }
+    return days;
+  }, [txs]);
+
+  if (session === "checking") {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="h-40 w-full max-w-lg animate-pulse rounded-feature bg-surface2" />
+      </div>
+    );
+  }
+
+  if (session === "guest") {
     const notice = error ? friendlyMessage(error === "ADMIN_REQUIRED" ? "Please sign in again" : error) : null;
     return (
       <main className="min-h-screen lg:grid lg:grid-cols-2">
@@ -157,6 +181,30 @@ export default function AdminPage() {
         ))}
       </div>
 
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <Card className="p-5 sm:p-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Payments by day</p>
+          <p className="mt-1 text-sm text-secondary">Count of existing transactions, last 14 days.</p>
+          <div className="mt-4">
+            <BarChart data={byDay} />
+          </div>
+        </Card>
+        <Card className="p-5 sm:p-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Payment status</p>
+          <p className="mt-1 text-sm text-secondary">From current transaction records only.</p>
+          <div className="mt-6">
+            <StatusBars
+              items={[
+                { label: "Confirmed", value: txs.filter((t) => t.status === "CONFIRMED").length, color: "bg-mint" },
+                { label: "Pending", value: txs.filter((t) => t.status === "PENDING").length, color: "bg-warning" },
+                { label: "Failed", value: txs.filter((t) => t.status === "FAILED").length, color: "bg-danger" },
+                { label: "Rejected", value: txs.filter((t) => t.status === "REJECTED").length, color: "bg-mute" },
+              ]}
+            />
+          </div>
+        </Card>
+      </div>
+
       <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <Card className="p-5 sm:p-6">
           <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Network health</p>
@@ -175,8 +223,8 @@ export default function AdminPage() {
             </Link>
           </div>
           <div className="mt-4 space-y-3">
-            {txs.length === 0 && <p className="text-sm text-mute">No transactions yet.</p>}
-            {txs.map((t) => (
+            {txs.slice(0, 6).length === 0 && <p className="text-sm text-mute">No transactions yet.</p>}
+            {txs.slice(0, 6).map((t) => (
               <div key={t.tx_hash} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-elevated px-3 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">{t.payment_type}</p>

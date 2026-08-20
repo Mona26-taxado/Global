@@ -92,7 +92,7 @@ export function DashShell({ children }: { children: React.ReactNode; title: stri
         </div>
       </header>
       <div className="mx-auto grid max-w-content gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[220px_1fr] lg:px-8 lg:py-8">
-        <nav className="hidden lg:flex lg:flex-col lg:gap-1">
+        <nav className="sticky top-24 hidden self-start lg:flex lg:flex-col lg:gap-1">
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (

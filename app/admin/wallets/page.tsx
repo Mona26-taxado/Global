@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin-shell";
 import { Card } from "@/components/ui/card";
 import { CopyButton, StatusBadge } from "@/components/ui/app-ui";
-import { AdminTable, ResponsiveDataList, adminTableClass, walletLabel } from "@/components/ui/data-list";
+import { AdminTable, Pager, ResponsiveDataList, adminTableClass, paginate, walletLabel } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
 
 type Row = {
@@ -18,9 +18,11 @@ type Row = {
 
 export default function AdminWallets() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [page, setPage] = useState(1);
   useEffect(() => {
     api<{ rows: Row[] }>("/api/admin/data?resource=wallets").then((r) => setRows(r.rows ?? []));
   }, []);
+  const paged = useMemo(() => paginate(rows, page), [rows, page]);
   return (
     <AdminShell title="Wallets" description="Private keys, seed phrases, and recovery phrases are never stored or shown.">
       <ResponsiveDataList
@@ -38,7 +40,7 @@ export default function AdminWallets() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((w) => (
+                {paged.slice.map((w) => (
                   <tr key={w.address} className="h-14 border-t border-line transition hover:bg-white/[0.03]">
                     <td className="px-4">
                       <span className="inline-flex items-center gap-1 font-mono text-xs">
@@ -59,7 +61,7 @@ export default function AdminWallets() {
             </table>
           </AdminTable>
         }
-        cards={rows.map((w) => (
+        cards={paged.slice.map((w) => (
           <Card key={w.address} className="p-4">
             <p className="font-mono text-sm">{shortAddr(w.address)}</p>
             <p className="mt-1 text-sm text-secondary">{walletLabel(w.wallet_type)}</p>
@@ -70,6 +72,7 @@ export default function AdminWallets() {
           </Card>
         ))}
       />
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={setPage} />
     </AdminShell>
   );
 }

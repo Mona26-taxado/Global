@@ -1,22 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { AdminShell } from "@/components/admin-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CopyButton, StatusBadge } from "@/components/ui/app-ui";
-import { AdminTable, ResponsiveDataList, adminTableClass, walletLabel } from "@/components/ui/data-list";
+import { AdminTable, Pager, ResponsiveDataList, adminTableClass, paginate, walletLabel } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
 
 type Row = Record<string, unknown>;
 
 export default function AdminUsers() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [page, setPage] = useState(1);
   useEffect(() => {
     api<{ rows: Row[] }>("/api/admin/data?resource=users").then((r) => setRows(r.rows ?? []));
   }, []);
+  const paged = useMemo(() => paginate(rows, page), [rows, page]);
   return (
     <AdminShell title="Users" description={`${rows.length} members. Wallet addresses are truncated; copy keeps the full value.`}>
       <ResponsiveDataList
@@ -36,7 +38,7 @@ export default function AdminUsers() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((u) => (
+                {paged.slice.map((u) => (
                   <tr key={String(u.id)} className="h-14 border-t border-line transition hover:bg-white/[0.03]">
                     <td className="px-4">
                       <span className="inline-flex items-center gap-1 font-mono text-xs">
@@ -72,7 +74,7 @@ export default function AdminUsers() {
             </table>
           </AdminTable>
         }
-        cards={rows.map((u) => (
+        cards={paged.slice.map((u) => (
           <Card key={String(u.id)} className="p-4">
             <p className="font-mono text-sm">{shortAddr(String(u.id))}</p>
             <p className="mt-1 font-mono text-xs text-secondary">{shortAddr(String(u.wallet ?? ""))}</p>
@@ -89,6 +91,7 @@ export default function AdminUsers() {
           </Card>
         ))}
       />
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={setPage} />
     </AdminShell>
   );
 }

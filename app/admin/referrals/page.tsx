@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { AdminShell } from "@/components/admin-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/app-ui";
-import { AdminTable, ResponsiveDataList, adminTableClass, fieldClass } from "@/components/ui/data-list";
+import { AdminTable, Pager, ResponsiveDataList, adminTableClass, fieldClass, paginate } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
 
 type Row = {
@@ -21,17 +21,21 @@ type Row = {
 
 export default function AdminReferrals() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
 
   function load(query = q) {
-    api<{ rows: Row[] }>(`/api/admin/data?resource=referrals&q=${encodeURIComponent(query)}`).then((r) =>
-      setRows(r.rows ?? []),
-    );
+    api<{ rows: Row[] }>(`/api/admin/data?resource=referrals&q=${encodeURIComponent(query)}`).then((r) => {
+      setRows(r.rows ?? []);
+      setPage(1);
+    });
   }
   useEffect(() => {
     load("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const paged = useMemo(() => paginate(rows, page), [rows, page]);
 
   return (
     <AdminShell title="Referrals" description="Sponsor relationships as stored by the existing referral records.">
@@ -61,7 +65,7 @@ export default function AdminReferrals() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {paged.slice.map((r) => (
                   <tr key={r.user_id} className="h-14 border-t border-line transition hover:bg-white/[0.03]">
                     <td className="px-4 font-mono text-xs">{shortAddr(r.user_id)}</td>
                     <td className="text-secondary">{r.sponsor_code ?? shortAddr(r.sponsor_id)}</td>
@@ -76,7 +80,7 @@ export default function AdminReferrals() {
             </table>
           </AdminTable>
         }
-        cards={rows.map((r) => (
+        cards={paged.slice.map((r) => (
           <Card key={r.user_id} className="p-4">
             <p className="font-display text-xl">{r.referral_code}</p>
             <p className="mt-1 font-mono text-xs text-secondary">{shortAddr(r.user_id)}</p>
@@ -87,6 +91,7 @@ export default function AdminReferrals() {
           </Card>
         ))}
       />
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={setPage} />
     </AdminShell>
   );
 }

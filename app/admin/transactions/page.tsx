@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { AdminShell } from "@/components/admin-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/app-ui";
-import { AdminTable, ResponsiveDataList, adminTableClass, fieldClass, formatTokenAmount } from "@/components/ui/data-list";
+import { AdminTable, Pager, ResponsiveDataList, adminTableClass, fieldClass, formatTokenAmount, paginate } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
 
 type Row = {
@@ -24,6 +24,7 @@ type Row = {
 
 export default function AdminTransactions() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [page, setPage] = useState(1);
   const [explorer, setExplorer] = useState("");
   const [status, setStatus] = useState("");
   const [type, setType] = useState("");
@@ -39,7 +40,10 @@ export default function AdminTransactions() {
     if (network) q.set("network", network);
     if (from) q.set("from", from);
     if (to) q.set("to", to);
-    api<{ rows: Row[] }>(`/api/admin/data?${q}`).then((r) => setRows(r.rows ?? []));
+    api<{ rows: Row[] }>(`/api/admin/data?${q}`).then((r) => {
+      setRows(r.rows ?? []);
+      setPage(1);
+    });
   }
 
   useEffect(() => {
@@ -47,6 +51,8 @@ export default function AdminTransactions() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const paged = useMemo(() => paginate(rows, page), [rows, page]);
 
   return (
     <AdminShell title="Transactions" description="On-chain payments only. Amounts are shown in token units, not raw integer decimals.">
@@ -95,7 +101,7 @@ export default function AdminTransactions() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((t) => (
+                {paged.slice.map((t) => (
                   <tr key={t.tx_hash} className="h-14 border-t border-line transition hover:bg-white/[0.03]">
                     <td className="px-4 font-mono text-xs">{shortAddr(t.user_id)}</td>
                     <td>{t.payment_type.replaceAll("_", " ")}</td>
@@ -124,7 +130,7 @@ export default function AdminTransactions() {
             </table>
           </AdminTable>
         }
-        cards={rows.map((t) => (
+        cards={paged.slice.map((t) => (
           <Card key={t.tx_hash} className="p-4">
             <div className="flex justify-between gap-2">
               <p className="text-sm font-semibold">{t.payment_type}</p>
@@ -143,6 +149,7 @@ export default function AdminTransactions() {
           </Card>
         ))}
       />
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={setPage} />
     </AdminShell>
   );
 }

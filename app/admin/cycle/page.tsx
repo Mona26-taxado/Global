@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/admin-shell";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/app-ui";
-import { AdminTable, ResponsiveDataList, adminTableClass, formatTokenAmount } from "@/components/ui/data-list";
+import { AdminTable, Pager, ResponsiveDataList, adminTableClass, formatTokenAmount, paginate } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
 import { parentOf, routingLabel, type NetNode } from "@/lib/cycle-ui";
 import { NetworkCanvas } from "@/components/network/tree";
@@ -48,6 +48,8 @@ export default function AdminCyclePage() {
   const [txs, setTxs] = useState<Tx[]>([]);
   const [refs, setRefs] = useState<ReferralRow[]>([]);
   const [tree, setTree] = useState<NetNode[]>([]);
+  const [refPage, setRefPage] = useState(1);
+  const [payPage, setPayPage] = useState(1);
 
   useEffect(() => {
     void Promise.all([
@@ -106,6 +108,10 @@ export default function AdminCyclePage() {
     }
     return [...m.entries()].sort((a, b) => a[0] - b[0]);
   }, [tree]);
+
+  const planTxs = useMemo(() => txs.filter((t) => t.payment_type === "PLAN_PURCHASE"), [txs]);
+  const pagedRefs = useMemo(() => paginate(refs, refPage), [refs, refPage]);
+  const pagedPays = useMemo(() => paginate(planTxs, payPage), [planTxs, payPage]);
 
   return (
     <AdminShell
@@ -169,7 +175,7 @@ export default function AdminCyclePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {refs.map((r) => (
+                  {pagedRefs.slice.map((r) => (
                     <tr key={r.user_id} className="h-14 border-t border-line hover:bg-white/[0.03]">
                       <td className="px-4 font-semibold">{r.referral_code}</td>
                       <td className="text-secondary">{r.sponsor_code ?? shortAddr(r.sponsor_id)}</td>
@@ -182,13 +188,14 @@ export default function AdminCyclePage() {
               </table>
             </AdminTable>
           }
-          cards={refs.map((r) => (
+          cards={pagedRefs.slice.map((r) => (
             <Card key={r.user_id} className="p-4">
               <p className="font-semibold">{r.referral_code}</p>
               <p className="mt-1 text-sm text-secondary">Sponsor {r.sponsor_code ?? shortAddr(r.sponsor_id)}</p>
             </Card>
           ))}
         />
+        <Pager page={pagedRefs.page} pages={pagedRefs.pages} total={pagedRefs.total} onPage={setRefPage} />
       </div>
 
       <h2 className="mt-8 font-display text-xl">Payment routing</h2>
@@ -209,9 +216,7 @@ export default function AdminCyclePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {txs
-                    .filter((t) => t.payment_type === "PLAN_PURCHASE")
-                    .map((t) => {
+                  {pagedPays.slice.map((t) => {
                       const payer = userById.get(t.user_id);
                       const rec = userByWallet.get(t.recipient_wallet?.toLowerCase() ?? "");
                       return (
@@ -233,9 +238,7 @@ export default function AdminCyclePage() {
               </table>
             </AdminTable>
           }
-          cards={txs
-            .filter((t) => t.payment_type === "PLAN_PURCHASE")
-            .map((t) => {
+          cards={pagedPays.slice.map((t) => {
               const payer = userById.get(t.user_id);
               const rec = userByWallet.get(t.recipient_wallet?.toLowerCase() ?? "");
               return (
@@ -250,6 +253,7 @@ export default function AdminCyclePage() {
               );
             })}
         />
+        <Pager page={pagedPays.page} pages={pagedPays.pages} total={pagedPays.total} onPage={setPayPage} />
       </div>
 
       <h2 className="mt-8 font-display text-xl">Global placement</h2>

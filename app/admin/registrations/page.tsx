@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { AdminShell } from "@/components/admin-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { StatusBadge } from "@/components/ui/app-ui";
-import { AdminTable, ResponsiveDataList, adminTableClass } from "@/components/ui/data-list";
+import { AdminTable, Pager, ResponsiveDataList, adminTableClass, paginate } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
 import { friendlyMessage } from "@/lib/user-errors";
 
@@ -23,6 +23,7 @@ type Row = {
 
 export default function AdminRegistrations() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [page, setPage] = useState(1);
   const [explorer, setExplorer] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -50,6 +51,7 @@ export default function AdminRegistrations() {
   }
 
   const alert = notice ? friendlyMessage(notice) : null;
+  const paged = useMemo(() => paginate(rows, page), [rows, page]);
 
   return (
     <AdminShell title="Registrations" description="On-chain $5 registration records. Verify retries existing pending hashes only.">
@@ -75,7 +77,7 @@ export default function AdminRegistrations() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {paged.slice.map((r) => (
                   <tr key={`${r.user}-${r.created_at}`} className="h-14 border-t border-line transition hover:bg-white/[0.03]">
                     <td className="px-4 font-mono text-xs">{shortAddr(r.user)}</td>
                     <td className="tabular">{r.fee}</td>
@@ -109,7 +111,7 @@ export default function AdminRegistrations() {
             </table>
           </AdminTable>
         }
-        cards={rows.map((r) => (
+        cards={paged.slice.map((r) => (
           <Card key={`${r.user}-${r.created_at}`} className="p-4">
             <div className="flex items-start justify-between gap-2">
               <p className="font-mono text-xs">{shortAddr(r.user)}</p>
@@ -132,6 +134,7 @@ export default function AdminRegistrations() {
           </Card>
         ))}
       />
+      <Pager page={paged.page} pages={paged.pages} total={paged.total} onPage={setPage} />
     </AdminShell>
   );
 }
