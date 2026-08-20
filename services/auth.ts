@@ -3,6 +3,7 @@ import { isAddress, verifyMessage } from "viem";
 import { assignSponsor, createUser, findSponsorByCode } from "@/services/users";
 import { newId, readStore, withStore } from "@/lib/store";
 import { activeChainId, appUrl } from "@/lib/network-config";
+import { isCompleteProfile, normalizeMemberProfile } from "@/lib/member-profile";
 import type { UserRow } from "@/types";
 
 const NONCE_TTL_MS = 10 * 60 * 1000;
@@ -37,6 +38,9 @@ export async function verifyLogin(input: {
   signature: `0x${string}`;
   referralCode?: string;
   walletType?: string;
+  display_name?: string;
+  email?: string;
+  mobile?: string;
 }): Promise<UserRow> {
   const address = input.address.toLowerCase() as `0x${string}`;
   const row = await withStore((store) => {
@@ -60,18 +64,38 @@ export async function verifyLogin(input: {
   });
 
   const snapshot = await readStore();
+  const profile = normalizeMemberProfile(input);
   const existing = snapshot.wallets.find((w) => w.address === address);
   if (existing) {
     const user = snapshot.users.find((u) => u.id === existing.user_id);
     if (!user) throw new Error("USER_NOT_FOUND");
+    if (isCompleteProfile(profile)) {
+      await withStore((store) => {
+        const row = store.users.find((u) => u.id === user.id);
+        if (!row) return;
+        row.display_name = profile.display_name;
+        row.email = profile.email;
+        row.mobile = profile.mobile;
+      });
+      return { ...user, ...profile };
+    }
     return user;
+  }
+
+  if (!isCompleteProfile(profile)) {
+    throw new Error("PROFILE_REQUIRED");
   }
 
   if (input.referralCode) {
     findSponsorByCode(snapshot.users, input.referralCode, "new");
   }
 
-  const user = await createUser({ display_name: "Member", is_demo: false });
+  const user = await createUser({
+    display_name: profile.display_name,
+    email: profile.email,
+    mobile: profile.mobile,
+    is_demo: false,
+  });
   if (input.referralCode) await assignSponsor(user.id, input.referralCode);
 
   await withStore((store) => {

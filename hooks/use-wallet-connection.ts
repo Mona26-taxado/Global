@@ -169,7 +169,7 @@ export function useWalletConnection() {
     }
   }, [address]);
 
-  const verify = useCallback(async (referralCode?: string) => {
+  const verify = useCallback(async (referralCode?: string, profile?: { display_name: string; email: string; mobile: string }) => {
     if (!address) return false;
     setPhase("VERIFYING");
     const nonceRes = await api<{ message: string; nonce: string }>("/api/auth/nonce", {
@@ -206,6 +206,9 @@ export function useWalletConnection() {
           signature,
           referralCode,
           walletType: wallet,
+          display_name: profile?.display_name,
+          email: profile?.email,
+          mobile: profile?.mobile,
         }),
       });
       if (!verifyRes.ok) throw new Error(verifyRes.error);

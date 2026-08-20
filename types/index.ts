@@ -22,6 +22,8 @@ export type UserRow = {
   sponsor_id: string | null;
   is_demo: boolean;
   display_name: string;
+  email?: string;
+  mobile?: string;
   created_at: string;
 };
 

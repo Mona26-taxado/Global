@@ -6,9 +6,13 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
+import { fieldClass } from "@/components/ui/data-list";
 import { useWalletConnection } from "@/hooks/use-wallet-connection";
 import { friendlyMessage } from "@/lib/user-errors";
+import { isCompleteProfile, normalizeMemberProfile } from "@/lib/member-profile";
 import { api, shortAddr } from "@/lib/utils";
+
+const PROFILE_KEY = "gx_member_profile";
 
 export function WalletModal({
   open,
@@ -24,13 +28,46 @@ export function WalletModal({
   const w = useWalletConnection();
   const waiting =
     w.phase === "OPENING_WALLET" || w.phase === "WAITING_FOR_APPROVAL" || w.phase === "CONNECTING";
-  const showChooser = !w.env.isDappBrowser && !w.address && !waiting;
   const [chainName, setChainName] = useState("Polygon");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [profileOk, setProfileOk] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const profile = normalizeMemberProfile({ display_name: name, email, mobile });
+  const showChooser = profileOk && !w.env.isDappBrowser && !w.address && !waiting;
+
   useEffect(() => {
     api<{ config: { chainName: string } }>("/api/config").then((r) => {
       if (r.config?.chainName) setChainName(r.config.chainName);
     });
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    try {
+      const raw = localStorage.getItem(PROFILE_KEY);
+      if (!raw) return;
+      const saved = normalizeMemberProfile(JSON.parse(raw));
+      setName(saved.display_name);
+      setEmail(saved.email);
+      setMobile(saved.mobile);
+      setProfileOk(isCompleteProfile(saved));
+    } catch {
+      /* ignore */
+    }
+  }, [open]);
+
+  function saveProfile() {
+    if (!isCompleteProfile(profile)) {
+      setFormError("Enter your full name, a valid email, and a 10–15 digit mobile number.");
+      return;
+    }
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    setFormError("");
+    setProfileOk(true);
+  }
 
   return (
     <Dialog.Root
@@ -45,20 +82,53 @@ export function WalletModal({
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(calc(100%-32px),480px)] max-h-[min(90vh,720px)] overflow-y-auto -translate-x-1/2 -translate-y-1/2 rounded-modal border border-line bg-elevated p-6 shadow-lift">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <Dialog.Title className="font-display text-[22px] leading-8 text-cream">Connect Wallet</Dialog.Title>
-              <p className="mt-2 text-sm text-secondary">Choose a wallet to securely sign in to GLOBAL X.</p>
+              <Dialog.Title className="font-display text-[22px] leading-8 text-cream">
+                {profileOk ? "Connect Wallet" : "Your details"}
+              </Dialog.Title>
+              <p className="mt-2 text-sm text-secondary">
+                {profileOk
+                  ? "Choose a wallet to securely sign in to GLOBAL X."
+                  : "Enter your name, email, and mobile number before connecting a wallet."}
+              </p>
             </div>
             <Dialog.Close className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-mute hover:bg-white/10 hover:text-cream" aria-label="Close">
               <X className="h-5 w-5" />
             </Dialog.Close>
           </div>
 
-          <div className="mt-5 rounded-card border border-info/30 bg-info/10 px-4 py-3">
-            <p className="text-sm font-semibold text-cream">Login only</p>
-            <p className="mt-0.5 text-sm text-secondary">Connecting your wallet does not transfer tokens.</p>
-          </div>
+          {!profileOk && (
+            <form
+              className="mt-5 space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveProfile();
+              }}
+            >
+              <input className={fieldClass} placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+              <input className={fieldClass} placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+              <input className={fieldClass} placeholder="Mobile number" type="tel" value={mobile} onChange={(e) => setMobile(e.target.value)} autoComplete="tel" />
+              {formError && (
+                <Alert tone="warning" title="Details needed">
+                  {formError}
+                </Alert>
+              )}
+              <Button className="w-full" type="submit">
+                Continue to wallet
+              </Button>
+            </form>
+          )}
 
-          {w.env.isDappBrowser && !w.address && (
+          {profileOk && (
+            <div className="mt-5 rounded-card border border-info/30 bg-info/10 px-4 py-3">
+              <p className="text-sm font-semibold text-cream">Login only</p>
+              <p className="mt-0.5 text-sm text-secondary">Connecting your wallet does not transfer tokens.</p>
+              <button type="button" className="mt-2 text-xs text-info" onClick={() => setProfileOk(false)}>
+                Edit {profile.display_name}
+              </button>
+            </div>
+          )}
+
+          {profileOk && w.env.isDappBrowser && !w.address && (
             <Button className="mt-6 w-full" onClick={() => w.connectInjected()}>
               <Wallet className="h-4 w-4" />
               Connect Wallet
@@ -138,7 +208,13 @@ export function WalletModal({
                 <Button
                   className="w-full"
                   onClick={async () => {
-                    const ok = await w.verify(referralCode);
+                    if (!isCompleteProfile(profile)) {
+                      setProfileOk(false);
+                      setFormError("Enter your details before verifying.");
+                      return;
+                    }
+                    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+                    const ok = await w.verify(referralCode, profile);
                     if (ok) onVerified?.();
                   }}
                 >

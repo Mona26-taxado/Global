@@ -24,10 +24,12 @@ export default function AdminUsers() {
       <ResponsiveDataList
         table={
           <AdminTable>
-            <table className={adminTableClass()}>
+            <table className={adminTableClass("min-w-[1080px]")}>
               <thead className="bg-elevated/80 text-[11px] uppercase tracking-[0.14em] text-mute">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Member</th>
+                  <th className="px-4 py-3 font-semibold">Name</th>
+                  <th className="font-semibold">Email</th>
+                  <th className="font-semibold">Mobile</th>
                   <th className="font-semibold">Wallet</th>
                   <th className="font-semibold">Provider</th>
                   <th className="font-semibold">Registration</th>
@@ -41,11 +43,16 @@ export default function AdminUsers() {
                 {paged.slice.map((u) => (
                   <tr key={String(u.id)} className="h-14 border-t border-line transition hover:bg-white/[0.03]">
                     <td className="px-4">
-                      <span className="inline-flex items-center gap-1 font-mono text-xs">
+                      <p className="font-semibold">{String(u.display_name ?? "—")}</p>
+                      <span className="inline-flex items-center gap-1 font-mono text-xs text-mute">
                         {shortAddr(String(u.id))}
                         <CopyButton value={String(u.id)} label="" />
                       </span>
                     </td>
+                    <td className="max-w-[180px] truncate text-sm text-secondary" title={String(u.email ?? "")}>
+                      {String(u.email ?? "—")}
+                    </td>
+                    <td className="whitespace-nowrap text-sm">{String(u.mobile ?? "—")}</td>
                     <td className="font-mono text-xs">
                       {u.wallet ? (
                         <span className="inline-flex items-center gap-1">
@@ -76,8 +83,10 @@ export default function AdminUsers() {
         }
         cards={paged.slice.map((u) => (
           <Card key={String(u.id)} className="p-4">
-            <p className="font-mono text-sm">{shortAddr(String(u.id))}</p>
-            <p className="mt-1 font-mono text-xs text-secondary">{shortAddr(String(u.wallet ?? ""))}</p>
+            <p className="font-semibold">{String(u.display_name ?? shortAddr(String(u.id)))}</p>
+            <p className="mt-1 text-sm text-secondary">{String(u.email ?? "—")}</p>
+            <p className="text-sm text-secondary">{String(u.mobile ?? "—")}</p>
+            <p className="mt-1 font-mono text-xs text-mute">{shortAddr(String(u.wallet ?? ""))}</p>
             <p className="mt-1 text-xs text-mute">{walletLabel(String(u.wallet_type ?? ""))}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <StatusBadge status={String(u.registration_status ?? "")} />

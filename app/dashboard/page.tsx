@@ -46,7 +46,7 @@ export default function DashboardPage() {
     <DashShell title="Overview">
       <PageHeader
         kicker="Overview"
-        title={`Welcome`}
+        title={me?.display_name ? `Welcome, ${me.display_name}` : "Welcome"}
         description="Your membership, wallet, and referrals in one place."
         actions={
           <div className="flex flex-wrap items-center gap-2">

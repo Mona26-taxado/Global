@@ -2,7 +2,13 @@ import { findPlacement } from "@/network/placement";
 import { makeReferralCode, newId, readStore, supabaseEnabled, withStore } from "@/lib/store";
 import type { NetworkPositionRow, UserRow } from "@/types";
 
-export async function createUser(input: { display_name?: string; is_demo?: boolean; id?: string }): Promise<UserRow> {
+export async function createUser(input: {
+  display_name?: string;
+  email?: string;
+  mobile?: string;
+  is_demo?: boolean;
+  id?: string;
+}): Promise<UserRow> {
   return withStore((store) => {
     const existing = store.users.find((u) => u.id === input.id);
     if (existing) return existing;
@@ -14,6 +20,8 @@ export async function createUser(input: { display_name?: string; is_demo?: boole
       sponsor_id: null,
       is_demo: Boolean(input.is_demo),
       display_name: input.display_name ?? "Member",
+      email: input.email,
+      mobile: input.mobile,
       created_at: new Date().toISOString(),
     };
     store.users.push(user);

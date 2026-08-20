@@ -17,6 +17,9 @@ export async function POST(req: NextRequest) {
       signature,
       referralCode: body.referralCode ? String(body.referralCode) : undefined,
       walletType: body.walletType ? String(body.walletType) : undefined,
+      display_name: body.display_name ? String(body.display_name) : undefined,
+      email: body.email ? String(body.email) : undefined,
+      mobile: body.mobile ? String(body.mobile) : undefined,
     });
     const session = await getSession();
     session.userId = user.id;

@@ -16,6 +16,9 @@ export type Me = {
   address?: string;
   wallet_type?: string;
   verified?: boolean;
+  display_name?: string;
+  email?: string;
+  mobile?: string;
   plans: string[];
   directs: number;
   active_referrals?: number;

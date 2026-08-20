@@ -41,7 +41,9 @@ export default function AdminUserView() {
             <p className="mt-3 font-display text-2xl">{String(user.referral_code ?? "Member")}</p>
             <div className="mt-4 grid gap-3">
               <Field label="User ID" value={user.id ?? params.id} />
-              <Field label="Display name" value={user.display_name} />
+              <Field label="Name" value={user.display_name} />
+              <Field label="Email" value={user.email} />
+              <Field label="Mobile" value={user.mobile} />
               <Field label="Sponsor" value={user.sponsor_id} />
             </div>
           </Card>

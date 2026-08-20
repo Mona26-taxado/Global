@@ -24,6 +24,18 @@ export default function ProfilePage() {
         <Card className="space-y-3 p-5 sm:p-6">
           <p className="text-[11px] uppercase tracking-[0.16em] text-mute">Account</p>
           <div>
+            <p className="text-xs text-mute">Name</p>
+            <p className="mt-1 text-sm text-cream">{me?.display_name ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-mute">Email</p>
+            <p className="mt-1 break-all text-sm text-cream">{me?.email ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-mute">Mobile</p>
+            <p className="mt-1 text-sm text-cream">{me?.mobile ?? "—"}</p>
+          </div>
+          <div>
             <p className="text-xs text-mute">Member ID</p>
             <p className="mt-1 truncate font-mono text-xs text-secondary">{me?.id}</p>
           </div>

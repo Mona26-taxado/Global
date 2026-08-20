@@ -71,6 +71,9 @@ export function friendlyMessage(raw?: string | null): { title: string; detail: s
   if (/unauthenticated|session/.test(lower)) {
     return { title: "Please sign in again", detail: "Connect your wallet and try Pay once more.", tone: "warning" };
   }
+  if (/profile_required/.test(lower)) {
+    return { title: "Your details are required", detail: "Enter your name, email, and mobile number before connecting a wallet.", tone: "warning" };
+  }
   if (/registration is already/.test(lower)) {
     return { title: "Already registered", detail: "Your $5 registration is already active.", tone: "success" };
   }
