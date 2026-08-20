@@ -214,11 +214,25 @@ export function usePay(resume?: { txHash?: string | null; paymentType?: string }
         body: JSON.stringify({ paymentType, txHash: hash }),
       });
       if (confirmed.code === "PENDING" || (confirmed.error && /not mined|not readable|RPC|authenticated/i.test(confirmed.error))) {
+        const me = await api<{ me?: { registration?: { status: string } } | null }>("/api/me");
+        if (me.me?.registration?.status === "ACTIVE") {
+          localStorage.removeItem(PAY_HASH_KEY);
+          localStorage.removeItem(PAY_TYPE_KEY);
+          setPhase("CONFIRMED");
+          return;
+        }
         setPhase("PENDING");
         await new Promise((r) => setTimeout(r, 1200));
         continue;
       }
       if (!confirmed.ok) {
+        const me = await api<{ me?: { registration?: { status: string } } | null }>("/api/me");
+        if (me.me?.registration?.status === "ACTIVE") {
+          localStorage.removeItem(PAY_HASH_KEY);
+          localStorage.removeItem(PAY_TYPE_KEY);
+          setPhase("CONFIRMED");
+          return;
+        }
         setPhase("FAILED");
         setError(confirmed.error ?? "Verification failed");
         localStorage.removeItem(PAY_HASH_KEY);

@@ -31,14 +31,9 @@ function RegisterInner() {
 
   useEffect(() => {
     loadMe();
-  }, []);
-
-  useEffect(() => {
-    if (me === "loading" || !me?.registration || me.registration.status === "ACTIVE") return;
-    if (me.registration.status !== "PENDING") return;
     const timer = setInterval(loadMe, 2000);
     return () => clearInterval(timer);
-  }, [me === "loading" ? "loading" : me?.registration?.status]);
+  }, []);
 
   if (me === "loading") return <p className="p-10 text-mute">Loading…</p>;
 

@@ -118,6 +118,11 @@ export async function confirmPayment(input: {
   txHash: Hash;
 }) {
   const prepared = await preparePayment(input.userId, input.paymentType, { forConfirm: true });
+  const already = await getRegistration(input.userId);
+  if (prepared.paymentType === "REGISTRATION" && already?.status === "ACTIVE") {
+    const existingTx = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
+    return { transaction: existingTx, registration: already };
+  }
   const existing = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
   if (existing?.status === "CONFIRMED") {
     let registration = await getRegistration(input.userId);
@@ -169,12 +174,27 @@ export async function confirmPayment(input: {
   }
 
   try {
-    const verified = await verifyTokenTransfer({
-      txHash: input.txHash,
-      expectedPayer: input.payerWallet,
-      expectedAmount: BigInt(prepared.amountUnits),
-      expectedRecipient: prepared.recipient,
-    });
+    let verified;
+    try {
+      verified = await verifyTokenTransfer({
+        txHash: input.txHash,
+        expectedPayer: input.payerWallet,
+        expectedAmount: BigInt(prepared.amountUnits),
+        expectedRecipient: prepared.recipient,
+      });
+    } catch (error) {
+      const ownedHash =
+        prepared.paymentType === "REGISTRATION" &&
+        (await getRegistration(input.userId))?.tx_hash?.toLowerCase() === input.txHash.toLowerCase();
+      if (!(error instanceof ChainVerifyError) || error.code !== "WRONG_SENDER" || !ownedHash) throw error;
+      const chainTx = await publicClient().getTransaction({ hash: input.txHash });
+      verified = await verifyTokenTransfer({
+        txHash: input.txHash,
+        expectedPayer: chainTx.from,
+        expectedAmount: BigInt(prepared.amountUnits),
+        expectedRecipient: prepared.recipient,
+      });
+    }
     const transaction = await withStore((store) => {
       const row = store.transactions.find((t) => t.id === draftId)!;
       row.status = "CONFIRMED";

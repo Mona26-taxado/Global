@@ -19,7 +19,7 @@ export function RegistrationPayCard({
   txHash?: string | null;
   onActive?: () => void;
 }) {
-  const pay = usePay({ txHash, paymentType: "REGISTRATION" });
+  const pay = usePay(status === "ACTIVE" ? undefined : { txHash, paymentType: "REGISTRATION" });
   const [cfg, setCfg] = useState<Cfg | null>(null);
   useEffect(() => {
     api<{ config: Cfg }>("/api/config").then((r) => setCfg(r.config));
@@ -38,7 +38,7 @@ export function RegistrationPayCard({
           : "NOT PAID";
 
   const hash = pay.txHash || txHash;
-  const notice = payNotice(pay.phase, pay.error);
+  const notice = status === "ACTIVE" ? payNotice("CONFIRMED") : payNotice(pay.phase, pay.error);
   const configAlert = !cfg?.usdtConfigured
     ? friendlyMessage("USDT testnet contract is not configured.")
     : null;
