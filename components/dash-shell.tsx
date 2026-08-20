@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
+import {
+  CreditCard,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  Receipt,
+  Share2,
+  User,
+  Wallet,
+} from "lucide-react";
 import { api, shortAddr } from "@/lib/utils";
 import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,23 +33,23 @@ export type Me = {
   is_demo: boolean;
 };
 
-const NAV = [
-  ["/dashboard", "Overview"],
-  ["/register", "Register"],
-  ["/dashboard/wallet", "Wallet"],
-  ["/plans", "Plans"],
-  ["/dashboard/referral", "Referral"],
-  ["/dashboard/transactions", "Activity"],
-  ["/dashboard/profile", "Profile"],
-] as const;
+const NAV: { href: string; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/register", label: "Register", icon: CreditCard },
+  { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
+  { href: "/plans", label: "Plans", icon: Receipt },
+  { href: "/dashboard/referral", label: "Referral", icon: Share2 },
+  { href: "/dashboard/transactions", label: "Activity", icon: Receipt },
+  { href: "/dashboard/profile", label: "Profile", icon: User },
+];
 
-const MOBILE_NAV = [
-  ["/dashboard", "Home"],
-  ["/register", "Pay"],
-  ["/plans", "Plans"],
-  ["/dashboard/referral", "Invite"],
-  ["/dashboard/wallet", "Wallet"],
-] as const;
+const MOBILE_NAV: { href: string; label: string; icon: ComponentType<{ className?: string }> }[] = [
+  { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/register", label: "Pay", icon: CreditCard },
+  { href: "/plans", label: "Plans", icon: Receipt },
+  { href: "/dashboard/referral", label: "Invite", icon: Share2 },
+  { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
+];
 
 export function DashShell({ children, title }: { children: React.ReactNode; title: string }) {
   const router = useRouter();
@@ -79,6 +89,7 @@ export function DashShell({ children, title }: { children: React.ReactNode; titl
             {testnet && <Badge>TESTNET</Badge>}
             <span className="hidden truncate font-mono text-xs text-mute sm:inline">{shortAddr(me.address)}</span>
             <Button variant="ghost" className="!px-3 !py-2 text-xs" onClick={logout}>
+              <LogOut className="h-3.5 w-3.5" />
               Disconnect
             </Button>
           </div>
@@ -86,16 +97,17 @@ export function DashShell({ children, title }: { children: React.ReactNode; titl
       </header>
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[220px_1fr] lg:py-8">
         <nav className="hidden lg:flex lg:flex-col lg:gap-1">
-          {NAV.map(([href, label]) => {
+          {NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (
               <Link
                 key={href}
                 href={href}
-                className={`rounded-xl px-3 py-2.5 text-sm no-underline ${
+                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm no-underline ${
                   active ? "bg-white/10 text-white" : "text-mute hover:bg-white/5 hover:text-white"
                 }`}
               >
+                <Icon className="h-4 w-4 shrink-0" />
                 {label}
               </Link>
             );
@@ -109,16 +121,17 @@ export function DashShell({ children, title }: { children: React.ReactNode; titl
       </div>
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#070b18]/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden">
         <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
-          {MOBILE_NAV.map(([href, label]) => {
-            const active = pathname === href || (href === "/dashboard" && pathname.startsWith("/dashboard") && pathname === "/dashboard");
+          {MOBILE_NAV.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href;
             return (
               <Link
                 key={href}
                 href={href}
-                className={`rounded-xl px-1 py-2 text-center text-[11px] font-semibold no-underline ${
+                className={`flex flex-col items-center gap-0.5 rounded-xl px-1 py-2 text-center text-[11px] font-semibold no-underline ${
                   active ? "bg-white/10 text-white" : "text-mute"
                 }`}
               >
+                <Icon className="h-4 w-4" />
                 {label}
               </Link>
             );
