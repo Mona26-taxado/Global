@@ -1,0 +1,148 @@
+export type NetworkId = "amoy" | "mainnet";
+
+export const AMOY_CHAIN_ID = 80002;
+export const MAINNET_CHAIN_ID = 137;
+export const AMOY_HEX = "0x13882";
+export const MAINNET_HEX = "0x89";
+
+export function publicNetwork(): NetworkId {
+  return process.env.NEXT_PUBLIC_NETWORK === "mainnet" ? "mainnet" : "amoy";
+}
+
+export function demoMode(): boolean {
+  return process.env.NEXT_PUBLIC_DEMO_MODE !== "false";
+}
+
+export function mainnetPaymentsEnabled(): boolean {
+  return process.env.MAINNET_PAYMENTS === "true";
+}
+
+export function activeChainId(network = publicNetwork()): number {
+  return network === "mainnet" ? MAINNET_CHAIN_ID : AMOY_CHAIN_ID;
+}
+
+export function activeChainHex(network = publicNetwork()): string {
+  return network === "mainnet" ? MAINNET_HEX : AMOY_HEX;
+}
+
+export function rpcUrl(network = publicNetwork()): string {
+  if (network === "mainnet") {
+    return process.env.POLYGON_RPC_URL || process.env.NEXT_PUBLIC_POLYGON_RPC_URL || "";
+  }
+  return (
+    process.env.POLYGON_AMOY_RPC_URL ||
+    process.env.NEXT_PUBLIC_POLYGON_AMOY_RPC_URL ||
+    "https://polygon-amoy.drpc.org"
+  );
+}
+
+export function usdtContract(network = publicNetwork()): `0x${string}` | undefined {
+  const raw =
+    network === "mainnet"
+      ? process.env.POLYGON_USDT_CONTRACT
+      : process.env.POLYGON_AMOY_USDT_CONTRACT;
+  return raw && raw.startsWith("0x") ? (raw as `0x${string}`) : undefined;
+}
+
+export function paymentRecipient(): `0x${string}` | undefined {
+  const raw = process.env.PAYMENT_RECIPIENT_ADDRESS;
+  return raw && raw.startsWith("0x") ? (raw as `0x${string}`) : undefined;
+}
+
+export function appUrl(): string {
+  return (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
+}
+
+export function isPrivateLanHost(hostname: string) {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)
+  );
+}
+
+/** TokenPocket callbacks must hit an address the phone can reach — not localhost. */
+export function requestAppUrl(headers: Headers) {
+  if (process.env.NODE_ENV === "production") return appUrl();
+  const origin = headers.get("origin");
+  if (origin) {
+    try {
+      const url = new URL(origin);
+      if (isPrivateLanHost(url.hostname)) return origin.replace(/\/$/, "");
+    } catch {
+      /* ignore */
+    }
+  }
+  const host = headers.get("x-forwarded-host") ?? headers.get("host");
+  if (host) {
+    const hostname = host.split(":")[0];
+    if (isPrivateLanHost(hostname)) {
+      const proto = headers.get("x-forwarded-proto") || "http";
+      return `${proto}://${host}`.replace(/\/$/, "");
+    }
+  }
+  return appUrl();
+}
+
+export function explorerBase(network = publicNetwork()): string {
+  if (network === "mainnet") {
+    return (process.env.POLYGON_EXPLORER_URL || "https://polygonscan.com").replace(/\/$/, "");
+  }
+  return (process.env.POLYGON_AMOY_EXPLORER_URL || "https://amoy.polygonscan.com").replace(/\/$/, "");
+}
+
+export function networkLabel(network = publicNetwork()): string {
+  return network === "mainnet" ? "Polygon" : "Polygon Amoy";
+}
+
+export function explorerTxUrl(txHash: string, network = publicNetwork()) {
+  return `${explorerBase(network)}/tx/${txHash}`;
+}
+
+export function usdtConfigured(network = publicNetwork()) {
+  return Boolean(usdtContract(network));
+}
+
+export function recipientConfigured() {
+  return Boolean(paymentRecipient());
+}
+
+export const REGISTRATION_USD = 5;
+
+export const DEFAULT_PLANS = [
+  {
+    code: "PLAN_100",
+    name: "$100 PLAN",
+    amount_usd: 100,
+    description: "GLOBAL X $100 membership plan.",
+  },
+  {
+    code: "PLAN_200",
+    name: "$200 PLAN",
+    amount_usd: 200,
+    description: "GLOBAL X $200 membership plan.",
+  },
+  {
+    code: "PLAN_500",
+    name: "$500 PLAN",
+    amount_usd: 500,
+    description: "GLOBAL X $500 membership plan.",
+  },
+  {
+    code: "PLAN_1000",
+    name: "$1000 PLAN",
+    amount_usd: 1000,
+    description: "GLOBAL X $1000 membership plan.",
+  },
+];
+
+export const DEFAULT_GLOBAL_CONFIG = {
+  qualification_rule: "User is verified and has at least one direct referral.",
+  global_entry_condition: "Enter Global after qualification. Prototype only — not a guarantee of income.",
+  two_branch_cycle: "Each position fills LEFT then RIGHT.",
+  placement_rule: "BFS from root: first vacant LEFT, then RIGHT.",
+  cycle_completion: "A cycle completes when both LEFT and RIGHT are filled.",
+  position_movement: "Next open BFS slot. Positions are never shuffled on refresh.",
+};

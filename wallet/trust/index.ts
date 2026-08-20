@@ -1,0 +1,1 @@
+export { trustOpenDapp } from "./deeplink";
