@@ -1,6 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
+import { Copy, Globe2, Shield, Smartphone, Wallet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
@@ -33,24 +34,39 @@ export function WalletModal({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-white/10 bg-[#0b1228] p-6 shadow-glow">
-          <Dialog.Title className="font-display text-2xl tracking-wide">Connect your wallet</Dialog.Title>
-          {/* IMPORTANT: Connect Wallet only authenticates. It must never initiate a transfer. */}
-          <p className="mt-2 text-sm text-mute">Trust Wallet or TokenPocket. Connection never sends a payment.</p>
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-white/10 bg-[#0b1228] p-6 shadow-glow">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <Dialog.Title className="font-display text-2xl tracking-wide">Connect your wallet</Dialog.Title>
+              <p className="mt-2 text-sm text-mute">Trust Wallet or TokenPocket. Connection never sends a payment.</p>
+            </div>
+            <Dialog.Close className="rounded-xl p-1 text-mute hover:bg-white/10 hover:text-white" aria-label="Close">
+              <X className="h-5 w-5" />
+            </Dialog.Close>
+          </div>
 
           {w.env.isDappBrowser && !w.address && (
             <Button className="mt-6 w-full" onClick={() => w.connectInjected()}>
-              Connect Wallet
+              <Wallet className="h-4 w-4" />
+              Connect wallet
             </Button>
           )}
 
           {showChooser && (
             <div className="mt-6 grid gap-3">
               <Button variant="ghost" className="w-full justify-between" onClick={w.connectTrust}>
-                Trust Wallet
+                <span className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-violet-200" />
+                  Trust Wallet
+                </span>
+                <Wallet className="h-4 w-4" />
               </Button>
               <Button variant="ghost" className="w-full justify-between" onClick={w.connectTokenPocket}>
-                TokenPocket
+                <span className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4 text-violet-200" />
+                  TokenPocket
+                </span>
+                <Wallet className="h-4 w-4" />
               </Button>
             </div>
           )}
@@ -73,6 +89,7 @@ export function WalletModal({
                   if (typeof window !== "undefined") navigator.clipboard.writeText(window.location.origin);
                 }}
               >
+                <Copy className="h-4 w-4" />
                 Copy site URL for phone
               </Button>
               <Button variant="ghost" className="w-full" onClick={w.reset}>
@@ -91,6 +108,7 @@ export function WalletModal({
               </p>
               {w.phase === "WRONG_NETWORK" ? (
                 <Button className="w-full" onClick={w.switchPolygon}>
+                  <Globe2 className="h-4 w-4" />
                   Switch to Polygon
                 </Button>
               ) : (
@@ -101,7 +119,8 @@ export function WalletModal({
                     if (ok) onVerified?.();
                   }}
                 >
-                  Verify Wallet
+                  <Wallet className="h-4 w-4" />
+                  Verify wallet
                 </Button>
               )}
             </div>
