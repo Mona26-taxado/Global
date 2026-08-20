@@ -3,7 +3,9 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
 import { useWalletConnection } from "@/hooks/use-wallet-connection";
+import { friendlyMessage } from "@/lib/user-errors";
 
 export function WalletModal({
   open,
@@ -59,9 +61,9 @@ export function WalletModal({
               <p className="text-sm text-slate-200">{w.message}</p>
               {w.desktopHint && (
                 <p className="text-sm text-mute">
-                  Mac/Windows Chrome TokenPocket app open nahi karta. Phone par TokenPocket kholo → DApp browser mein{" "}
-                  <span className="text-violet-200">{typeof window !== "undefined" ? window.location.origin : ""}</span>{" "}
-                  open karo, phir Connect. Laptop par ye screen waiting mein rahegi jab tak phone approve na kare.
+                  TokenPocket on Mac/Windows Chrome does not open the app. On your phone, open TokenPocket → DApp browser →{" "}
+                  <span className="text-violet-200">{typeof window !== "undefined" ? window.location.origin : ""}</span>
+                  , then Connect. This screen waits until the phone approves.
                 </p>
               )}
               <Button
@@ -105,7 +107,17 @@ export function WalletModal({
             </div>
           )}
 
-          {w.message && !waiting && <p className="mt-4 text-sm text-slate-200">{w.message}</p>}
+          {w.error && !waiting && (() => {
+            const n = friendlyMessage(w.error);
+            return (
+              <Alert className="mt-4" tone={n.tone} title={n.title}>
+                {n.detail}
+              </Alert>
+            );
+          })()}
+          {!w.error && w.message && !waiting && w.phase !== "AUTHENTICATED" && (
+            <p className="mt-4 text-sm text-slate-200">{w.message}</p>
+          )}
           <p className="mt-6 text-xs leading-relaxed text-mute">
             GLOBAL X will never ask for your recovery phrase or private key.
           </p>

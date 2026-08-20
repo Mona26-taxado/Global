@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { DashShell } from "@/components/dash-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 import { api } from "@/lib/utils";
 import { usePay } from "@/hooks/use-pay";
+import { friendlyMessage, payNotice } from "@/lib/user-errors";
 import Link from "next/link";
 
 type Plan = {
@@ -37,15 +39,19 @@ export default function PlansPage() {
     });
   }, [pay.phase]);
 
+  const payAlert = payNotice(pay.phase, pay.error);
+  const listError = error ? friendlyMessage(error) : null;
+
   return (
     <DashShell title="Plans">
       <p className="mt-2 text-sm text-mute">
         After registration is ACTIVE: Direct #1 pays your sponsor’s wallet. Direct #2 waits until the sponsor is placed in Global, then pays the Global upline. GLOBAL X never holds the funds.
       </p>
-      {error && (
-        <p className="mt-4 text-sm text-danger">
-          {error} <Link href="/register">Complete registration</Link>
-        </p>
+      {listError && (
+        <Alert className="mt-4" tone={listError.tone} title={listError.title}>
+          {listError.detail}{" "}
+          <Link href="/register">Complete registration</Link>
+        </Alert>
       )}
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         {(plans ?? []).filter((p) => p.active).map((p) => (
@@ -59,7 +65,9 @@ export default function PlansPage() {
             <p className="mt-3 text-xs text-mute">{quote.notice}</p>
           )}
           {p.status !== "ACTIVE" && selected === p.code && quoteError && (
-            <p className="mt-3 text-sm text-danger">{quoteError}</p>
+            <Alert className="mt-3" tone={friendlyMessage(quoteError).tone} title={friendlyMessage(quoteError).title}>
+              {friendlyMessage(quoteError).detail}
+            </Alert>
           )}
           {p.status !== "ACTIVE" && selected === p.code && !quoteError && (
             <Button className="mt-4 w-full" onClick={() => pay.pay(p.code)}>
@@ -92,7 +100,11 @@ export default function PlansPage() {
           </Card>
         ))}
       </div>
-      {pay.message && <p className="mt-4 text-sm">{pay.message}</p>}
+      {payAlert && (
+        <Alert className="mt-4" tone={payAlert.tone} title={payAlert.title}>
+          {payAlert.detail}
+        </Alert>
+      )}
       {pay.txHash && explorer && (
         <a className="mt-2 block font-mono text-xs" href={`${explorer}/tx/${pay.txHash}`} target="_blank" rel="noreferrer">
           {pay.txHash}

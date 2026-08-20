@@ -2,7 +2,9 @@
 
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 import { usePay } from "@/hooks/use-pay";
+import { friendlyMessage, payNotice } from "@/lib/user-errors";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/utils";
 
@@ -36,19 +38,25 @@ export function RegistrationPayCard({
           : "NOT PAID";
 
   const hash = pay.txHash || txHash;
+  const notice = payNotice(pay.phase, pay.error);
+  const configAlert = !cfg?.usdtConfigured
+    ? friendlyMessage("USDT testnet contract is not configured.")
+    : null;
 
   return (
-    <Card className="mt-6 p-6">
+    <Card className="mt-6 p-5 sm:p-6">
       {cfg?.testnet && <Badge>TESTNET</Badge>}
       <h2 className="mt-3 font-display text-2xl">GLOBAL X REGISTRATION</h2>
-      <p className="mt-1 text-sm text-mute">Registration Fee</p>
+      <p className="mt-1 text-sm text-mute">One-time registration fee</p>
       <div className="mt-2 font-display text-4xl">$5 USDT</div>
-      <p className="mt-2 text-sm text-mute">Network: {cfg?.chainName ?? "Polygon Amoy"}</p>
+      <p className="mt-2 text-sm text-mute">Network: {cfg?.chainName ?? "Polygon"}</p>
       <p className="mt-4 text-sm">
         Status: <span className="text-violet-200">{uiStatus}</span>
       </p>
-      {!cfg?.usdtConfigured && (
-        <p className="mt-3 text-sm text-danger">USDT testnet contract is not configured.</p>
+      {configAlert && (
+        <Alert className="mt-4" tone={configAlert.tone} title={configAlert.title}>
+          {configAlert.detail}
+        </Alert>
       )}
       {status !== "ACTIVE" && (
         <Button
@@ -56,17 +64,16 @@ export function RegistrationPayCard({
           disabled={pay.phase === "WALLET_CONFIRMATION" || cfg?.usdtConfigured === false}
           onClick={() => pay.pay("REGISTRATION")}
         >
-          {pay.phase === "WALLET_CONFIRMATION" ? "Waiting for wallet confirmation..." : "PAY $5 REGISTRATION"}
+          {pay.phase === "WALLET_CONFIRMATION" ? "Waiting for wallet…" : "Pay $5 registration"}
         </Button>
       )}
-      {pay.message && <p className="mt-3 text-sm">{pay.message}</p>}
-      {pay.phase === "FAILED" && (
-        <p className="mt-2 text-sm text-mute">
-          Confirm par fee 0 POL na honi chahiye. Wallet mein is network ka POL (gas) aur Pay wala USDT dono chahiye.
-        </p>
+      {notice && (
+        <Alert className="mt-4" tone={notice.tone} title={notice.title}>
+          {notice.detail}
+        </Alert>
       )}
       {hash && (
-        <p className="mt-3 break-all font-mono text-xs">
+        <p className="mt-3 break-all font-mono text-xs text-mute">
           {hash}
           {cfg?.explorer && (
             <>
