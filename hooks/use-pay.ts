@@ -41,15 +41,57 @@ export function payPhaseMessage(phase: PayPhase) {
 }
 
 function walletErrorMessage(err: unknown): string {
-  if (typeof err === "string" && err.trim()) return err;
-  if (err && typeof err === "object") {
+  let msg = "";
+  if (typeof err === "string" && err.trim()) msg = err;
+  else if (err && typeof err === "object") {
     const o = err as { code?: number; message?: string; data?: { message?: string } };
     if (o.code === 4001 || o.code === 5000) return "Payment rejected.";
-    if (o.data?.message) return o.data.message;
-    if (o.message) return o.message;
+    msg = o.data?.message || o.message || "";
+  } else if (err instanceof Error && err.message) msg = err.message;
+  const nested = msg.match(/\{[\s\S]*"error"\s*:\s*"([^"]+)"/);
+  if (nested?.[1]) msg = nested[1];
+  if (/gasLimit is too low/i.test(msg)) {
+    return "Wallet gas was 0. Open the site again after the next update and retry Pay — gas is now set on the transaction.";
   }
-  if (err instanceof Error && err.message) return err.message;
-  return "Payment failed";
+  return msg || "Payment failed";
+}
+
+function toHex(n: bigint) {
+  return `0x${n.toString(16)}`;
+}
+
+async function withGas(
+  provider: { request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown> },
+  tx: { from: string; to: string; data: string; value: string },
+) {
+  let gas = 100000n;
+  try {
+    const estimated = await provider.request({
+      method: "eth_estimateGas",
+      params: [tx],
+    });
+    if (typeof estimated === "string" && estimated.startsWith("0x")) {
+      const n = BigInt(estimated);
+      if (n > 0n) gas = (n * 13n) / 10n;
+    }
+  } catch {
+    /* TokenPocket sometimes returns 0 without a limit; ERC-20 transfer still needs gas. */
+  }
+  if (gas < 65000n) gas = 65000n;
+  const gasHex = toHex(gas);
+  let gasPrice: string | undefined;
+  try {
+    const price = await provider.request({ method: "eth_gasPrice" });
+    if (typeof price === "string" && price.startsWith("0x") && BigInt(price) > 0n) gasPrice = price;
+  } catch {
+    /* wallet will fill if supported */
+  }
+  return {
+    ...tx,
+    gas: gasHex,
+    gasLimit: gasHex,
+    ...(gasPrice ? { gasPrice } : {}),
+  };
 }
 
 function extractSendHash(raw: unknown): `0x${string}` {
@@ -93,16 +135,15 @@ export function usePay() {
           functionName: "transfer",
           args: [prep.payment.recipient as `0x${string}`, BigInt(prep.payment.amountUnits)],
         });
+        const tx = await withGas(provider, {
+          from: accounts[0],
+          to: prep.payment.tokenContract,
+          data,
+          value: "0x0",
+        });
         const raw = await provider.request({
           method: "eth_sendTransaction",
-          params: [
-            {
-              from: accounts[0],
-              to: prep.payment.tokenContract,
-              data,
-              value: "0x0",
-            },
-          ],
+          params: [tx],
         });
         hash = extractSendHash(raw);
       } else {

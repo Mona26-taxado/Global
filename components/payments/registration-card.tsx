@@ -62,7 +62,7 @@ export function RegistrationPayCard({
       {pay.message && <p className="mt-3 text-sm">{pay.message}</p>}
       {pay.phase === "FAILED" && (
         <p className="mt-2 text-sm text-mute">
-          Wallet password ke baad ye page wapas aa sakta hai. Agar transaction revert hui ho to is wallet mein configured USDT + POL (gas) check karo.
+          Confirm par fee 0 POL na honi chahiye. Wallet mein is network ka POL (gas) aur Pay wala USDT dono chahiye.
         </p>
       )}
       {hash && (
