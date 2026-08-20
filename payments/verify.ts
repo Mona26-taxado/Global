@@ -32,12 +32,28 @@ export async function verifyTokenTransfer(input: {
   if (!isHash(input.txHash)) throw new ChainVerifyError("BAD_HASH", "A real transaction hash is required.");
 
   const client = publicClient();
-  const chainId = await client.getChainId();
+  let chainId: number;
+  try {
+    chainId = await client.getChainId();
+  } catch (error) {
+    throw new ChainVerifyError(
+      "PENDING",
+      error instanceof Error ? error.message : "RPC is not reachable. Payment is waiting for verification.",
+    );
+  }
   if (chainId !== activeChainId()) {
     throw new ChainVerifyError("WRONG_CHAIN", `Expected chain ${activeChainId()}, RPC reported ${chainId}.`);
   }
 
-  const tx = await client.getTransaction({ hash: input.txHash });
+  let tx;
+  try {
+    tx = await client.getTransaction({ hash: input.txHash });
+  } catch (error) {
+    throw new ChainVerifyError(
+      "PENDING",
+      error instanceof Error ? error.message : "Transaction is not readable from RPC yet.",
+    );
+  }
   let receipt;
   try {
     receipt = await client.getTransactionReceipt({ hash: input.txHash });

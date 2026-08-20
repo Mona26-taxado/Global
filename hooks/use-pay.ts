@@ -1,6 +1,6 @@
 "use client";
 
-import { encodeFunctionData, erc20Abi } from "viem";
+import { encodeFunctionData, erc20Abi, isHash } from "viem";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/utils";
 import { getInjectedProvider } from "@/wallet/dapp-browser/detect";
@@ -15,6 +15,9 @@ export type PayPhase =
   | "CONFIRMED"
   | "FAILED"
   | "REJECTED";
+
+const PAY_HASH_KEY = "gx_pay_hash";
+const PAY_TYPE_KEY = "gx_pay_type";
 
 export function payPhaseMessage(phase: PayPhase) {
   switch (phase) {
@@ -35,6 +38,30 @@ export function payPhaseMessage(phase: PayPhase) {
     default:
       return "";
   }
+}
+
+function walletErrorMessage(err: unknown): string {
+  if (typeof err === "string" && err.trim()) return err;
+  if (err && typeof err === "object") {
+    const o = err as { code?: number; message?: string; data?: { message?: string } };
+    if (o.code === 4001 || o.code === 5000) return "Payment rejected.";
+    if (o.data?.message) return o.data.message;
+    if (o.message) return o.message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return "Payment failed";
+}
+
+function extractSendHash(raw: unknown): `0x${string}` {
+  const candidates: unknown[] = [raw];
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    candidates.push(o.hash, o.txHash, o.txid, o.transactionHash, o.result);
+  }
+  for (const value of candidates) {
+    if (typeof value === "string" && isHash(value)) return value;
+  }
+  throw new Error("Wallet did not return a transaction hash.");
 }
 
 export function usePay() {
@@ -66,10 +93,18 @@ export function usePay() {
           functionName: "transfer",
           args: [prep.payment.recipient as `0x${string}`, BigInt(prep.payment.amountUnits)],
         });
-        hash = (await provider.request({
+        const raw = await provider.request({
           method: "eth_sendTransaction",
-          params: [{ from: accounts[0], to: prep.payment.tokenContract, data }],
-        })) as string;
+          params: [
+            {
+              from: accounts[0],
+              to: prep.payment.tokenContract,
+              data,
+              value: "0x0",
+            },
+          ],
+        });
+        hash = extractSendHash(raw);
       } else {
         const started = await api<{ deepLink: string; actionId: string }>("/api/wallet/tokenpocket/start", {
           method: "POST",
@@ -77,25 +112,35 @@ export function usePay() {
         });
         if (!started.ok) throw new Error(started.error);
         localStorage.setItem("gx_tp_pay", started.actionId);
-        localStorage.setItem("gx_tp_pay_type", paymentType);
+        localStorage.setItem(PAY_TYPE_KEY, paymentType);
         setPhase("WALLET_CONFIRMATION");
         window.location.href = started.deepLink!;
         return;
       }
 
+      localStorage.setItem(PAY_HASH_KEY, hash);
+      localStorage.setItem(PAY_TYPE_KEY, paymentType);
       setTxHash(hash);
       setPhase("SUBMITTED");
       await confirmOnServer(paymentType, hash);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Payment failed";
+      const msg = walletErrorMessage(err);
       setError(msg);
       setPhase(msg.toLowerCase().includes("reject") ? "REJECTED" : "FAILED");
     }
   }
 
   useEffect(() => {
+    const savedHash = localStorage.getItem(PAY_HASH_KEY);
+    const savedType = localStorage.getItem(PAY_TYPE_KEY);
+    if (savedHash && savedType && isHash(savedHash)) {
+      setTxHash(savedHash);
+      setPhase("PENDING");
+      void confirmOnServer(savedType, savedHash);
+    }
+
     const pending = localStorage.getItem("gx_tp_pay");
-    const type = localStorage.getItem("gx_tp_pay_type");
+    const type = localStorage.getItem(PAY_TYPE_KEY);
     if (!pending || !type) return;
     const startedAt = Date.now();
     const timer = setInterval(async () => {
@@ -106,7 +151,7 @@ export function usePay() {
       if (st.status === "CALLBACK_RECEIVED" && hash.startsWith("0x")) {
         clearInterval(timer);
         localStorage.removeItem("gx_tp_pay");
-        localStorage.removeItem("gx_tp_pay_type");
+        localStorage.setItem(PAY_HASH_KEY, hash);
         setTxHash(hash);
         setPhase("SUBMITTED");
         await confirmOnServer(type, hash);
@@ -114,7 +159,7 @@ export function usePay() {
       if (Date.now() - startedAt > 5 * 60 * 1000) {
         clearInterval(timer);
         setPhase("FAILED");
-        setError("Payment timed out.");
+        setError("Payment timed out. If the wallet showed success, wait and tap Pay again to retry verification.");
       }
     }, 2500);
     return () => clearInterval(timer);
@@ -127,7 +172,7 @@ export function usePay() {
         method: "POST",
         body: JSON.stringify({ paymentType, txHash: hash }),
       });
-      if (confirmed.code === "PENDING") {
+      if (confirmed.code === "PENDING" || (confirmed.error && /not mined|not readable|RPC|authenticated/i.test(confirmed.error))) {
         setPhase("PENDING");
         await new Promise((r) => setTimeout(r, 4000));
         continue;
@@ -135,13 +180,16 @@ export function usePay() {
       if (!confirmed.ok) {
         setPhase("FAILED");
         setError(confirmed.error ?? "Verification failed");
+        localStorage.removeItem(PAY_HASH_KEY);
         return;
       }
+      localStorage.removeItem(PAY_HASH_KEY);
+      localStorage.removeItem(PAY_TYPE_KEY);
       setPhase("CONFIRMED");
       return;
     }
     setPhase("PENDING");
-    setError("Still waiting for blockchain confirmation. Refresh later.");
+    setError("Still waiting for blockchain confirmation. Keep this page open or refresh.");
   }
 
   return { phase, error, txHash, message: error || payPhaseMessage(phase), pay, setPhase, setTxHash };

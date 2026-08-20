@@ -12,6 +12,13 @@ import { PlanRoutingError, resolvePlanRecipient } from "@/payments/plan-routing"
 import { ChainVerifyError, verifyTokenTransfer } from "@/payments/verify";
 import type { RegistrationRow, TransactionRow } from "@/types";
 
+function isRetryableRpcError(error: unknown) {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /authenticated|Must be authenticated|HTTP request failed|timeout|429|503|fetch failed|rate limit|RPC/i.test(
+    msg,
+  );
+}
+
 export function amountToUnits(usd: number, decimals = 6) {
   return BigInt(usd) * BigInt(10) ** BigInt(decimals);
 }
@@ -176,7 +183,8 @@ export async function confirmPayment(input: {
     }
     return { transaction, registration };
   } catch (error) {
-    const pending = error instanceof ChainVerifyError && error.code === "PENDING";
+    const pending =
+      (error instanceof ChainVerifyError && error.code === "PENDING") || isRetryableRpcError(error);
     await withStore((store) => {
       const row = store.transactions.find((t) => t.id === draftId);
       if (row) {

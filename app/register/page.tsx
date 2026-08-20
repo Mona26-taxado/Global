@@ -38,8 +38,7 @@ function RegisterInner() {
   if (me) {
     return (
       <main className="mx-auto max-w-lg px-4 py-16">
-        <Badge>TESTNET</Badge>
-        <h1 className="mt-4 font-display text-4xl">Registration</h1>
+        <h1 className="font-display text-4xl">Registration</h1>
         <RegistrationPayCard
           status={me.registration?.status ?? "NOT_PAID"}
           txHash={me.registration?.tx_hash}
