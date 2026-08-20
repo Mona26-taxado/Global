@@ -9,7 +9,8 @@
     "lint": "next lint",
     "test": "vitest run",
     "seed": "tsx supabase/seed-cli.ts",
-    "seed:genesis": "tsx supabase/seed-genesis.ts"
+    "seed:genesis": "tsx supabase/seed-genesis.ts",
+    "retry:pending": "tsx supabase/retry-pending.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",

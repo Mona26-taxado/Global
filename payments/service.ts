@@ -1,4 +1,4 @@
-import type { Hash } from "viem";
+import { isHash, type Hash } from "viem";
 import {
   REGISTRATION_USD,
   activeChainId,
@@ -10,6 +10,7 @@ import {
 import { newId, readStore, withStore } from "@/lib/store";
 import { PlanRoutingError, resolvePlanRecipient } from "@/payments/plan-routing";
 import { ChainVerifyError, verifyTokenTransfer } from "@/payments/verify";
+import { publicClient } from "@/lib/viem";
 import type { RegistrationRow, TransactionRow } from "@/types";
 
 function isRetryableRpcError(error: unknown) {
@@ -118,8 +119,20 @@ export async function confirmPayment(input: {
 }) {
   const prepared = await preparePayment(input.userId, input.paymentType, { forConfirm: true });
   const existing = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
-  if (existing?.status === "CONFIRMED") return { transaction: existing, registration: await getRegistration(input.userId) };
-  if (existing && existing.status !== "PENDING") throw new Error("TX_ALREADY_USED");
+  if (existing?.status === "CONFIRMED") {
+    let registration = await getRegistration(input.userId);
+    if (prepared.paymentType === "REGISTRATION" && registration && registration.status !== "ACTIVE") {
+      registration = await withStore((store) => {
+        const reg = store.registrations.find((r) => r.user_id === input.userId)!;
+        reg.status = "ACTIVE";
+        reg.tx_hash = input.txHash;
+        reg.activated_at = reg.activated_at ?? new Date().toISOString();
+        return reg;
+      });
+    }
+    return { transaction: existing, registration };
+  }
+  if (existing && existing.user_id !== input.userId) throw new Error("TX_ALREADY_USED");
 
   const draftId = existing?.id ?? newId("tx");
   if (!existing) {
@@ -210,6 +223,21 @@ export async function confirmPlanPayment(input: {
   txHash: Hash;
 }) {
   return confirmPayment({ ...input, paymentType: input.planCode });
+}
+
+export async function retryPendingRegistration(userId: string) {
+  const store = await readStore();
+  const reg = store.registrations.find((r) => r.user_id === userId);
+  if (!reg || reg.status === "ACTIVE") return { registration: reg ?? null };
+  if (!reg.tx_hash || !isHash(reg.tx_hash)) return { registration: reg };
+  const chainTx = await publicClient().getTransaction({ hash: reg.tx_hash });
+  const payer = chainTx.from;
+  return confirmPayment({
+    userId,
+    payerWallet: payer,
+    paymentType: "REGISTRATION",
+    txHash: reg.tx_hash,
+  });
 }
 
 export async function listUserPlans(userId: string) {

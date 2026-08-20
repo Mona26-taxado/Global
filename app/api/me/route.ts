@@ -1,7 +1,7 @@
 import { jsonOk } from "@/lib/http";
 import { getSession } from "@/lib/session";
 import { readStore } from "@/lib/store";
-import { getRegistration } from "@/payments/service";
+import { getRegistration, retryPendingRegistration } from "@/payments/service";
 import { appUrl } from "@/lib/network-config";
 
 export async function GET() {
@@ -12,7 +12,15 @@ export async function GET() {
   if (!user) return jsonOk({ me: null });
   const wallet = store.wallets.find((w) => w.user_id === user.id);
   const referred = store.users.filter((u) => u.sponsor_id === user.id && !u.is_demo);
-  const registration = await getRegistration(user.id);
+  let registration = await getRegistration(user.id);
+  if (registration?.status === "PENDING" && registration.tx_hash) {
+    try {
+      const retried = await retryPendingRegistration(user.id);
+      registration = retried.registration ?? registration;
+    } catch {
+      /* keep PENDING until chain verify succeeds */
+    }
+  }
   const txs = store.transactions.filter((t) => t.user_id === user.id);
   const plans = txs.filter((t) => t.payment_type === "PLAN_PURCHASE" && t.status === "CONFIRMED").map((t) => t.plan_code);
   const referrals = referred.map((u) => {
