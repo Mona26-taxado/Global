@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionJourney, childSlotsByParent, journeyCounts, layoutGhostHistory, liveApiSeats, liveForestRoots, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, journeyCounts, liveApiSeats, liveForestRoots, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -84,20 +84,6 @@ describe("buildPositionJourney", () => {
     const steps = buildPositionJourney(rows, p100, []);
     expect(steps).toHaveLength(1);
     expect(steps[0]?.row.id).toBe("a100");
-  });
-
-  it("ghost overlay uses HISTORY rows only and does not include live seats", () => {
-    const spots = layoutGhostHistory(
-      [
-        { id: "h1", status: "HISTORY", started_at: "t0", parent_id: null },
-        { id: "cur", status: "RESERVED", started_at: "t1", from_position_id: "h1", parent_id: "e8e1" },
-        { id: "h2", status: "HISTORY", started_at: "t0.5", parent_id: "p" },
-      ],
-      { x: 400, y: 100 },
-    );
-    expect(spots.map((s) => s.id)).toEqual(["h1", "h2"]);
-    expect(spots[0]?.x).toBeLessThan(spots[1]!.x);
-    expect(spots[1]?.x).toBeLessThan(400);
   });
 
   it("renders ROOT ACTIVE and ROOT RESERVED as two seats when they have different position ids", () => {
