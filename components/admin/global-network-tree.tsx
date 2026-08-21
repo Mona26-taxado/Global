@@ -17,7 +17,14 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { parentOf, routingLabel, type NetNode } from "@/lib/cycle-ui";
+import {
+  LEGACY_PLACEMENT_NOTE,
+  legacyPlacementIds,
+  parentOf,
+  placementLockTx,
+  routingLabel,
+  type NetNode,
+} from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -180,11 +187,13 @@ function MemberCard({
   placed,
   selected,
   user,
+  legacy,
   onSelect,
 }: {
   placed: Placed;
   selected: boolean;
   user?: CycleUser;
+  legacy?: boolean;
   onSelect: () => void;
 }) {
   if (placed.vis.kind === "empty") {
@@ -218,6 +227,14 @@ function MemberCard({
       }`}
       style={{ left: placed.x - NODE_W / 2, top: placed.y, width: NODE_W, height: NODE_H }}
     >
+      {legacy && (
+        <span
+          className="absolute right-1.5 top-1.5 rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide text-warning"
+          title={LEGACY_PLACEMENT_NOTE}
+        >
+          Legacy
+        </span>
+      )}
       <div className="flex items-start gap-2">
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${reserved ? "bg-warning/70" : "bg-gradient-to-br from-violet/80 to-electric/70"}`}>
           {initials(code)}
@@ -295,6 +312,11 @@ export function GlobalNetworkTree({
   }, [wallets, users, userById]);
 
   const liveTree = useMemo(() => tree.filter((n) => !n.user?.is_demo), [tree]);
+  const planTxs = useMemo(
+    () => txs.filter((t) => !planId || t.plan_id === planId || t.plan_code === planId),
+    [txs, planId],
+  );
+  const legacyIds = useMemo(() => legacyPlacementIds(liveTree, planTxs, refs), [liveTree, planTxs, refs]);
   const maxDepth = levels === "all" ? Infinity : levels;
   const roots = useMemo(() => {
     const ids = new Set(liveTree.map((n) => n.id));
@@ -401,6 +423,11 @@ export function GlobalNetworkTree({
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
   const leftChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
   const rightChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
+  const selectedLegacy = selectedNode ? legacyIds.has(selectedNode.id) : false;
+  const selectedLock = selectedNode ? placementLockTx(selectedNode, planTxs, refs) : null;
+  const historicalRecipient = selectedLock?.recipient ?? selectedNode?.recipient_wallet ?? null;
+  const historicalTx = selectedLock?.txHash ?? selectedNode?.reentry_tx_hash ?? routeTx?.tx_hash ?? null;
+  const placementDate = selectedNode?.started_at ?? selectedLock?.createdAt ?? null;
   const historySorted = [...historyRows].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
 
   function historyBlock() {
@@ -431,9 +458,14 @@ export function GlobalNetworkTree({
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-[0.16em] text-mute">Selected node</p>
           <p className="mt-2 truncate font-display text-lg text-cream">{selectedNode.user?.referral_code ?? shortAddr(selectedNode.user_id)}</p>
-          <div className="mt-2">
+          <p className="mt-2">
             <StatusBadge status={statusOf(selectedNode)} />
-          </div>
+            {selectedLegacy && (
+              <span className="ml-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warning" title={LEGACY_PLACEMENT_NOTE}>
+                Legacy
+              </span>
+            )}
+          </p>
         </div>
         <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line text-mute hover:text-cream" onClick={() => setSelectedId(null)} aria-label="Close">
           <X className="h-4 w-4" />
@@ -462,6 +494,31 @@ export function GlobalNetworkTree({
           <p className="text-cream">{selectedNode.position ?? "ROOT"}</p>
           <p className="mt-2 text-secondary">Current status</p>
           <StatusBadge status={statusOf(selectedNode)} />
+          <p className="mt-3 text-secondary">Placement Rule</p>
+          <p className="text-cream" title={selectedLegacy ? LEGACY_PLACEMENT_NOTE : undefined}>
+            {selectedLegacy ? "Legacy" : "Current"}
+          </p>
+          {historicalRecipient && (
+            <>
+              <p className="mt-2 text-secondary">Historical Recipient</p>
+              <p className="font-mono text-xs text-cream">{shortAddr(historicalRecipient)}</p>
+            </>
+          )}
+          {historicalTx && (
+            <>
+              <p className="mt-2 text-secondary">Tx Hash</p>
+              <a className="inline-flex items-center gap-1 font-mono text-[11px] text-electric no-underline" href={explorerTxUrl(historicalTx)} target="_blank" rel="noreferrer">
+                {shortAddr(historicalTx)}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </>
+          )}
+          {placementDate && (
+            <>
+              <p className="mt-2 text-secondary">Placement Date</p>
+              <p className="text-cream">{new Date(placementDate).toLocaleString()}</p>
+            </>
+          )}
           <p className="mt-3 text-secondary">LEFT child</p>
           <p className="text-cream">{leftChild?.user?.referral_code ?? "Empty"}</p>
           <p className="mt-2 text-secondary">RIGHT child</p>
@@ -527,6 +584,10 @@ export function GlobalNetworkTree({
           </p>
         </div>
       </div>
+      <Alert className="mt-4" tone="info" title="Placement rule updated">
+        Existing confirmed positions remain unchanged. New Global placements and re-entries use first-empty
+        placement: top-to-bottom, LEFT then RIGHT.
+      </Alert>
       {searchNote && <p className="mt-2 text-sm text-secondary">{searchNote}</p>}
 
       <div className="mt-4 space-y-3 lg:hidden">
@@ -536,8 +597,13 @@ export function GlobalNetworkTree({
               <p className="text-[10px] uppercase tracking-[0.16em] text-mute">Selected user</p>
               <p className="mt-1 font-display text-xl text-cream">{selectedNode.user?.referral_code}</p>
               <p className="font-mono text-xs text-mute">{selectedUser?.wallet ? shortAddr(selectedUser.wallet) : ""}</p>
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 <StatusBadge status={statusOf(selectedNode)} />
+                {selectedLegacy && (
+                  <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warning" title={LEGACY_PLACEMENT_NOTE}>
+                    Legacy
+                  </span>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-1 gap-2">
@@ -559,6 +625,33 @@ export function GlobalNetworkTree({
                 <p className="text-[10px] uppercase text-mute">RIGHT child</p>
                 <p className="text-sm text-cream">{rightChild?.user?.referral_code ?? "Empty"}</p>
               </div>
+              <div className="rounded-xl border border-line bg-[#0B1220] p-3">
+                <p className="text-[10px] uppercase text-mute">Placement Rule</p>
+                <p className="text-sm text-cream" title={selectedLegacy ? LEGACY_PLACEMENT_NOTE : undefined}>
+                  {selectedLegacy ? "Legacy" : "Current"}
+                </p>
+              </div>
+              {historicalRecipient && (
+                <div className="rounded-xl border border-line bg-[#0B1220] p-3">
+                  <p className="text-[10px] uppercase text-mute">Historical Recipient</p>
+                  <p className="font-mono text-sm text-cream">{shortAddr(historicalRecipient)}</p>
+                </div>
+              )}
+              {historicalTx && (
+                <div className="rounded-xl border border-line bg-[#0B1220] p-3">
+                  <p className="text-[10px] uppercase text-mute">Tx Hash</p>
+                  <a className="inline-flex items-center gap-1 font-mono text-sm text-electric no-underline" href={explorerTxUrl(historicalTx)} target="_blank" rel="noreferrer">
+                    {shortAddr(historicalTx)}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+              {placementDate && (
+                <div className="rounded-xl border border-line bg-[#0B1220] p-3">
+                  <p className="text-[10px] uppercase text-mute">Placement Date</p>
+                  <p className="text-sm text-cream">{new Date(placementDate).toLocaleString()}</p>
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -678,6 +771,7 @@ export function GlobalNetworkTree({
                           selected={p.vis.node?.id === selectedId}
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
+                          legacy={Boolean(p.vis.node && legacyIds.has(p.vis.node.id))}
                         />
                       ))}
                     </div>
@@ -699,6 +793,10 @@ export function GlobalNetworkTree({
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-4 border border-dashed border-warning" /> RESERVED
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="rounded px-1 text-[8px] font-bold uppercase text-warning">Legacy</span>
+                  confirmed under a previous placement rule
                 </span>
                 <span className="inline-flex items-center gap-1.5">HISTORY lives in the detail timeline</span>
               </div>
