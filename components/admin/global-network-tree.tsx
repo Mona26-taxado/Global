@@ -17,7 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { buildPositionJourney, journeyCounts, parentOf, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, GHOST_H, GHOST_W, journeyCounts, layoutGhostHistory, parentOf, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -277,6 +277,7 @@ export function GlobalNetworkTree({
   const [levels, setLevels] = useState<3 | 5 | "all">(5);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [legend, setLegend] = useState(true);
+  const [showJourney, setShowJourney] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState<JourneyPosition[]>([]);
   const [searchNote, setSearchNote] = useState("");
@@ -439,7 +440,21 @@ export function GlobalNetworkTree({
   const counts = journeyCounts(journey);
   const previousHistory = [...historyRows].filter((p) => p.status === "HISTORY").sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? ""))).at(-1);
   const selectedPlaced = selectedNode ? placed.find((p) => p.vis.node?.id === selectedNode.id) : undefined;
-  const drawW = canvasW + (selectedPlaced && previousHistory ? NODE_W + 48 : 0);
+  const ghostSpots = useMemo(() => {
+    if (!showJourney || !selectedPlaced) return [];
+    return layoutGhostHistory(historyRows, { x: selectedPlaced.x, y: selectedPlaced.y });
+  }, [showJourney, selectedPlaced, historyRows]);
+  const ghostShiftX = useMemo(() => {
+    if (!ghostSpots.length) return 0;
+    const minX = Math.min(...ghostSpots.map((g) => g.x - GHOST_W / 2));
+    return minX < 16 ? 16 - minX : 0;
+  }, [ghostSpots]);
+  const drawW = Math.max(
+    canvasW + ghostShiftX,
+    ...ghostSpots.map((g) => g.x + ghostShiftX + GHOST_W / 2 + 16),
+    selectedPlaced && showJourney ? selectedPlaced.x + ghostShiftX + NODE_W : 0,
+  );
+  const drawH = Math.max(canvasH, ...ghostSpots.map((g) => g.y + GHOST_H + 16));
 
   useEffect(() => {
     if (!searchNote || !selectedNode) return;
@@ -658,6 +673,7 @@ export function GlobalNetworkTree({
                 className="mt-1 text-left text-xs text-electric"
                 onClick={() => {
                   setHistoryOpen(true);
+                  setShowJourney(true);
                   requestAnimationFrame(() => document.getElementById("gx-journey")?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
                 }}
               >
@@ -742,6 +758,13 @@ export function GlobalNetworkTree({
               </select>
             </label>
             <span className="rounded-lg border border-line bg-elevated px-2.5 py-2 text-[11px] text-mute">Binary (Left → Right)</span>
+            <button
+              type="button"
+              className={`inline-flex h-9 items-center rounded-xl border px-3 text-[11px] ${showJourney ? "border-violet/40 bg-violet/15 text-cream" : "border-line bg-elevated text-secondary"}`}
+              onClick={() => setShowJourney((v) => !v)}
+            >
+              Show Position Journey
+            </button>
           </div>
         </div>
 
@@ -775,8 +798,8 @@ export function GlobalNetworkTree({
                     <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} />
                   </div>
                   <TransformComponent wrapperClass="!w-full !h-[560px] lg:!h-[640px]" contentClass="p-8">
-                    <div className="relative" style={{ width: drawW, height: canvasH }}>
-                      <svg className="absolute inset-0" width={drawW} height={canvasH}>
+                    <div className="relative" style={{ width: drawW, height: drawH }}>
+                      <svg className="absolute inset-0" width={drawW} height={drawH}>
                         {placed.map((p) => {
                           if (p.vis.kind !== "member" || !p.vis.node) return null;
                           const kids = placed.filter((c) => {
@@ -784,9 +807,9 @@ export function GlobalNetworkTree({
                             return c.vis.key.startsWith(`${p.vis.node?.id}-empty`);
                           });
                           return kids.map((c) => {
-                            const x1 = p.x;
+                            const x1 = p.x + ghostShiftX;
                             const y1 = p.y + NODE_H;
-                            const x2 = c.x;
+                            const x2 = c.x + ghostShiftX;
                             const y2 = c.y;
                             const midY = (y1 + y2) / 2;
                             const isRight = c.vis.position === "RIGHT";
@@ -809,42 +832,58 @@ export function GlobalNetworkTree({
                             );
                           });
                         })}
-                        {selectedPlaced && previousHistory && (
-                          <g>
-                            <path
-                              d={`M ${selectedPlaced.x + NODE_W / 2 + 8} ${selectedPlaced.y + NODE_H / 2} L ${selectedPlaced.x + NODE_W + 28} ${selectedPlaced.y + NODE_H / 2}`}
-                              fill="none"
-                              stroke="rgba(154,168,199,0.55)"
-                              strokeWidth="2"
-                              strokeDasharray="5 5"
-                            />
-                          </g>
-                        )}
+                        {showJourney &&
+                          selectedPlaced &&
+                          ghostSpots.map((g, i) => {
+                            const fromX = g.x + ghostShiftX;
+                            const fromY = g.y + GHOST_H / 2;
+                            const next = ghostSpots[i + 1];
+                            const toX = next ? next.x + ghostShiftX : selectedPlaced.x + ghostShiftX - NODE_W / 2;
+                            const toY = next ? next.y + GHOST_H / 2 : selectedPlaced.y + NODE_H / 2;
+                            return (
+                              <g key={`ghost-line-${g.id}`}>
+                                <path
+                                  d={`M ${fromX + GHOST_W / 2} ${fromY} L ${toX} ${toY}`}
+                                  fill="none"
+                                  stroke="rgba(154,168,199,0.55)"
+                                  strokeWidth="2"
+                                  strokeDasharray="5 5"
+                                />
+                              </g>
+                            );
+                          })}
                       </svg>
                       {placed.map((p) => (
                         <MemberCard
                           key={p.vis.key}
-                          placed={p}
+                          placed={{ ...p, x: p.x + ghostShiftX }}
                           selected={p.vis.node?.id === selectedId}
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
                           planId={planId}
                         />
                       ))}
-                      {selectedPlaced && previousHistory && (
-                        <div
-                          className="pointer-events-none absolute rounded-[14px] border border-dashed border-mute/50 bg-[#0B1220]/80 px-2 py-2"
-                          style={{
-                            left: selectedPlaced.x + NODE_W / 2 + 28,
-                            top: selectedPlaced.y + 12,
-                            width: NODE_W,
-                          }}
-                        >
-                          <p className="text-[9px] font-semibold uppercase tracking-wide text-mute">Previous position</p>
-                          <p className="mt-1 text-[11px] text-cream">{previousHistory.parent_code ?? (previousHistory.parent_id ? "—" : "Root")}</p>
-                          <p className="text-[10px] text-mute">{previousHistory.position ?? "ROOT"} · HISTORY</p>
-                        </div>
-                      )}
+                      {showJourney &&
+                        ghostSpots.map((g) => (
+                          <div
+                            key={`ghost-${g.id}`}
+                            className="pointer-events-none absolute rounded-[12px] border border-dashed border-mute/45 bg-[#0B1220]/55 px-2 py-1.5 opacity-80"
+                            style={{
+                              left: g.x + ghostShiftX - GHOST_W / 2,
+                              top: g.y,
+                              width: GHOST_W,
+                              height: GHOST_H,
+                            }}
+                          >
+                            <p className="text-[8px] font-bold uppercase tracking-wide text-mute">
+                              {g.row.parent_id ? "History" : "Previous"}
+                            </p>
+                            <p className="mt-0.5 truncate text-[11px] text-cream/80">
+                              {g.row.parent_code ?? (g.row.parent_id ? "—" : "ROOT")}
+                            </p>
+                            <p className="text-[9px] text-mute">{g.row.position ?? "ROOT"} · #{g.index}</p>
+                          </div>
+                        ))}
                     </div>
                   </TransformComponent>
                 </TransformWrapper>
@@ -866,9 +905,9 @@ export function GlobalNetworkTree({
                   <span className="h-2 w-4 border border-dashed border-warning" /> RESERVED
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> Previous (selected only)
+                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> Ghost HISTORY (journey on)
                 </span>
-                <span className="inline-flex items-center gap-1.5">HISTORY lives in Position Journey</span>
+                <span className="inline-flex items-center gap-1.5">HISTORY also in Position Journey drawer</span>
               </div>
             )}
           </div>

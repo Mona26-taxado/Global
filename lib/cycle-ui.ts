@@ -163,3 +163,38 @@ export function journeyCounts(steps: JourneyStep[]) {
   };
 }
 
+export const GHOST_W = 92;
+export const GHOST_H = 72;
+const GHOST_GAP = 48;
+
+export type GhostHistorySpot = {
+  id: string;
+  index: number;
+  x: number;
+  y: number;
+  row: JourneyPosition;
+};
+
+/**
+ * Overlay coordinates for HISTORY seats of one selected member.
+ * Display-only: does not occupy live LEFT/RIGHT slots.
+ */
+export function layoutGhostHistory(
+  rows: JourneyPosition[],
+  selected: { x: number; y: number } | null,
+): GhostHistorySpot[] {
+  if (!selected) return [];
+  const history = rows
+    .filter((r) => r.status === "HISTORY")
+    .sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
+  const n = history.length;
+  return history.map((row, i) => ({
+    id: row.id,
+    index: i + 1,
+    row,
+    x: selected.x - (n - i) * (GHOST_W + GHOST_GAP),
+    y: row.parent_id ? selected.y + 20 : Math.max(12, selected.y - 8),
+  }));
+}
+
+
