@@ -18,8 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
 import {
+  CURRENT_PLACEMENT_MODEL_LABEL,
   LEGACY_PLACEMENT_NOTE,
-  legacyPlacementIds,
+  legacyRecordIds,
+  logicalCurrentTree,
   parentOf,
   placementLockTx,
   routingLabel,
@@ -78,7 +80,7 @@ type VisNode = {
 type Placed = { vis: VisNode; x: number; y: number };
 
 const NODE_W = 122;
-const NODE_H = 112;
+const NODE_H = 128;
 const H_GAP = 40;
 const V_GAP = 96;
 
@@ -103,11 +105,7 @@ function buildChildMap(tree: NetNode[]) {
     if (!n.parent_id) continue;
     const slot = byParent.get(n.parent_id) ?? {};
     if (n.position === "LEFT") slot.left = n;
-    if (n.position === "RIGHT") slot.right = n;
-    if (n.position !== "LEFT" && n.position !== "RIGHT") {
-      if (!slot.left) slot.left = n;
-      else slot.right = n;
-    }
+    else if (n.position === "RIGHT") slot.right = n;
     byParent.set(n.parent_id, slot);
   }
   return byParent;
@@ -183,17 +181,24 @@ function Toolbar({ legendOpen, onLegend }: { legendOpen: boolean; onLegend: () =
   );
 }
 
+function walletTail(addr?: string | null) {
+  if (!addr) return null;
+  return addr.slice(-4);
+}
+
 function MemberCard({
   placed,
   selected,
   user,
   legacy,
+  planId,
   onSelect,
 }: {
   placed: Placed;
   selected: boolean;
   user?: CycleUser;
   legacy?: boolean;
+  planId?: string;
   onSelect: () => void;
 }) {
   if (placed.vis.kind === "empty") {
@@ -209,10 +214,13 @@ function MemberCard({
     );
   }
   const node = placed.vis.node!;
+  const reserved = statusOf(node) === "RESERVED";
+  const isRoot = !node.parent_id && !reserved;
   const code = node.user?.referral_code ?? shortAddr(node.user_id);
+  const tail = walletTail(user?.wallet);
+  const label = reserved ? (node.source_is_root ? "ROOT" : tail ?? code) : isRoot ? "ROOT" : tail ?? code;
   const st = statusOf(node);
-  const reserved = st === "RESERVED";
-  const plan = planLabel(user?.current_plan);
+  const plan = planLabel(planId) ?? planLabel(user?.current_plan);
   return (
     <button
       type="button"
@@ -222,26 +230,26 @@ function MemberCard({
         selected
           ? "border-violet bg-[#0D1424] shadow-[0_0_0_1px_rgba(124,92,255,0.45),0_0_28px_rgba(124,92,255,0.28)]"
           : reserved
-            ? "border-dashed border-warning/50 bg-[#0B1220]/70 hover:border-warning"
+            ? "border-dashed border-warning bg-[#0B1220]/70 hover:border-warning"
             : "border-line bg-[#0B1220] hover:-translate-y-0.5 hover:border-violet/35 hover:shadow-card"
       }`}
       style={{ left: placed.x - NODE_W / 2, top: placed.y, width: NODE_W, height: NODE_H }}
     >
       {legacy && (
         <span
-          className="absolute right-1.5 top-1.5 rounded px-1 py-px text-[8px] font-bold uppercase tracking-wide text-warning"
+          className="absolute right-1 top-1 rounded px-1 py-px text-[7px] font-bold uppercase tracking-wide text-warning"
           title={LEGACY_PLACEMENT_NOTE}
         >
-          Legacy
+          Legacy record
         </span>
       )}
       <div className="flex items-start gap-2">
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${reserved ? "bg-warning/70" : "bg-gradient-to-br from-violet/80 to-electric/70"}`}>
-          {initials(code)}
+          {initials(label)}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-[12px] font-semibold tracking-wide text-cream">{code}</p>
-          <p className="font-mono text-[10px] text-mute">{user?.wallet ? shortAddr(user.wallet) : shortAddr(node.user_id)}</p>
+          <p className="truncate font-mono text-[12px] font-semibold tracking-wide text-cream">{label}</p>
+          {reserved && <p className="text-[10px] font-semibold uppercase tracking-wide text-warning">Reserved</p>}
         </div>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-1">
@@ -250,7 +258,14 @@ function MemberCard({
         </span>
         <StatusBadge status={st} />
       </div>
-      {plan && <p className="mt-1 text-[10px] text-secondary">{plan}</p>}
+      {reserved ? (
+        <>
+          {plan && <p className="mt-1 text-[10px] text-secondary">{plan}</p>}
+          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">Payment Required</p>
+        </>
+      ) : (
+        plan && <p className="mt-1 text-[10px] text-secondary">{plan}</p>
+      )}
     </button>
   );
 }
@@ -312,21 +327,22 @@ export function GlobalNetworkTree({
   }, [wallets, users, userById]);
 
   const liveTree = useMemo(() => tree.filter((n) => !n.user?.is_demo), [tree]);
+  const logicalTree = useMemo(() => logicalCurrentTree(liveTree), [liveTree]);
   const planTxs = useMemo(
     () => txs.filter((t) => !planId || t.plan_id === planId || t.plan_code === planId),
     [txs, planId],
   );
-  const legacyIds = useMemo(() => legacyPlacementIds(liveTree, planTxs, refs), [liveTree, planTxs, refs]);
+  const legacyIds = useMemo(() => legacyRecordIds(liveTree, logicalTree), [liveTree, logicalTree]);
   const maxDepth = levels === "all" ? Infinity : levels;
   const roots = useMemo(() => {
-    const ids = new Set(liveTree.map((n) => n.id));
-    return liveTree.filter((n) => !n.parent_id || !ids.has(n.parent_id)).sort((a, b) => a.depth - b.depth);
-  }, [liveTree]);
+    const ids = new Set(logicalTree.map((n) => n.id));
+    return logicalTree.filter((n) => !n.parent_id || !ids.has(n.parent_id)).sort((a, b) => a.depth - b.depth);
+  }, [logicalTree]);
 
   const visRoots = useMemo(() => {
-    const byParent = buildChildMap(liveTree);
+    const byParent = buildChildMap(logicalTree);
     return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1));
-  }, [liveTree, roots, maxDepth]);
+  }, [logicalTree, roots, maxDepth]);
 
   const placed = useMemo(() => {
     const out: Placed[] = [];
@@ -342,9 +358,13 @@ export function GlobalNetworkTree({
   const canvasW = useMemo(() => Math.max(640, ...placed.map((p) => p.x + NODE_W), 24), [placed]);
   const canvasH = useMemo(() => Math.max(420, ...placed.map((p) => p.y + NODE_H + 40), 120), [placed]);
 
-  const selectedNode = liveTree.find((n) => n.id === selectedId) ?? null;
+  const selectedNode = logicalTree.find((n) => n.id === selectedId) ?? null;
+  const persistedRow = selectedNode
+    ? liveTree.find((n) => n.id === selectedNode.id) ?? liveTree.find((n) => n.user_id === selectedNode.user_id && (n.status ?? "ACTIVE") === "ACTIVE")
+    : undefined;
   const selectedUser = selectedNode ? userById.get(selectedNode.user_id) : undefined;
-  const globalParent = parentOf(liveTree, selectedNode ?? undefined);
+  const globalParent = parentOf(logicalTree, selectedNode ?? undefined);
+  const historicalParent = parentOf(liveTree, persistedRow);
 
   useEffect(() => {
     if (!selectedNode) {
@@ -369,7 +389,7 @@ export function GlobalNetworkTree({
   function selectNode(node: NetNode, fromSearch = false) {
     setSelectedId(node.id);
     setHistoryOpen(false);
-    const parent = parentOf(liveTree, node);
+    const parent = parentOf(logicalTree, node);
     if (fromSearch) {
       const branch = node.position ? `${node.position} branch` : "root";
       const under = parent?.user?.referral_code;
@@ -397,10 +417,10 @@ export function GlobalNetworkTree({
       ) ?? userByWallet.get(needle);
     const node =
       (user
-        ? liveTree.find((n) => n.user_id === user.id && (n.status ?? "ACTIVE") === "ACTIVE") ??
-          liveTree.find((n) => n.user_id === user.id)
+        ? logicalTree.find((n) => n.user_id === user.id && (n.status ?? "ACTIVE") === "ACTIVE") ??
+          logicalTree.find((n) => n.user_id === user.id)
         : undefined) ??
-      liveTree.find(
+      logicalTree.find(
         (n) =>
           n.user_id.toLowerCase().includes(needle) ||
           (n.user?.referral_code ?? "").toLowerCase().includes(needle) ||
@@ -421,13 +441,15 @@ export function GlobalNetworkTree({
   const routeTx = [...memberTxs]
     .filter((t) => t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY")
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-  const leftChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
-  const rightChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
-  const selectedLegacy = selectedNode ? legacyIds.has(selectedNode.id) : false;
-  const selectedLock = selectedNode ? placementLockTx(selectedNode, planTxs, refs) : null;
-  const historicalRecipient = selectedLock?.recipient ?? selectedNode?.recipient_wallet ?? null;
-  const historicalTx = selectedLock?.txHash ?? selectedNode?.reentry_tx_hash ?? routeTx?.tx_hash ?? null;
-  const placementDate = selectedNode?.started_at ?? selectedLock?.createdAt ?? null;
+  const leftChild = selectedNode ? logicalTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
+  const rightChild = selectedNode ? logicalTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
+  const selectedLegacy = persistedRow ? legacyIds.has(persistedRow.id) : false;
+  const selectedLock = persistedRow ? placementLockTx(persistedRow, planTxs, refs) : null;
+  const historicalRecipient = selectedLock?.recipient ?? persistedRow?.recipient_wallet ?? null;
+  const historicalTx = selectedLock?.txHash ?? persistedRow?.reentry_tx_hash ?? routeTx?.tx_hash ?? null;
+  const placementDate = persistedRow?.started_at ?? selectedLock?.createdAt ?? null;
+  const reservedSelected = statusOf(selectedNode ?? undefined) === "RESERVED";
+  const newParentUser = globalParent ? userById.get(globalParent.user_id) : undefined;
   const historySorted = [...historyRows].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
 
   function historyBlock() {
@@ -462,7 +484,7 @@ export function GlobalNetworkTree({
             <StatusBadge status={statusOf(selectedNode)} />
             {selectedLegacy && (
               <span className="ml-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warning" title={LEGACY_PLACEMENT_NOTE}>
-                Legacy
+                Legacy record
               </span>
             )}
           </p>
@@ -487,24 +509,66 @@ export function GlobalNetworkTree({
           <p className="text-cream">{myDirect?.direct_number ?? "—"}</p>
         </section>
         <section>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Global</p>
-          <p className="mt-2 text-secondary">Current parent</p>
-          <p className="text-cream">{globalParent?.user?.referral_code ?? (selectedNode.parent_id ? "—" : "Root")}</p>
-          <p className="mt-2 text-secondary">Position</p>
-          <p className="text-cream">{selectedNode.position ?? "ROOT"}</p>
-          <p className="mt-2 text-secondary">Current status</p>
-          <StatusBadge status={statusOf(selectedNode)} />
-          <p className="mt-3 text-secondary">Placement Rule</p>
-          <p className="text-cream" title={selectedLegacy ? LEGACY_PLACEMENT_NOTE : undefined}>
-            {selectedLegacy ? "Legacy" : "Current"}
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Current Global Position</p>
+          <p className="mt-2 text-secondary">Plan</p>
+          <p className="text-cream">{planLabel(planId) ?? planLabel(selectedUser?.current_plan) ?? "—"}</p>
+          <p className="mt-2 text-secondary">Logical parent</p>
+          <p className="text-cream">
+            {globalParent ? walletTail(userById.get(globalParent.user_id)?.wallet) ?? globalParent.user?.referral_code : selectedNode.parent_id ? "—" : "Root"}
           </p>
-          {historicalRecipient && (
+          <p className="mt-2 text-secondary">LEFT / RIGHT</p>
+          <p className="text-cream">{selectedNode.position ?? "ROOT"}</p>
+          <p className="mt-2 text-secondary">Status</p>
+          <StatusBadge status={statusOf(selectedNode)} />
+          <p className="mt-2 text-secondary">Current cycle</p>
+          <p className="text-cream">
+            {reservedSelected ? "Re-entry reserved — payment required" : `${leftChild ? "LEFT filled" : "LEFT empty"} · ${rightChild ? "RIGHT filled" : "RIGHT empty"}`}
+          </p>
+          <p className="mt-3 text-secondary">LEFT child</p>
+          <p className="text-cream">
+            {leftChild ? (statusOf(leftChild) === "RESERVED" ? "RESERVED" : walletTail(userById.get(leftChild.user_id)?.wallet) ?? leftChild.user?.referral_code) : "Empty"}
+          </p>
+          <p className="mt-2 text-secondary">RIGHT child</p>
+          <p className="text-cream">
+            {rightChild ? (statusOf(rightChild) === "RESERVED" ? "RESERVED" : walletTail(userById.get(rightChild.user_id)?.wallet) ?? rightChild.user?.referral_code) : "Empty"}
+          </p>
+        </section>
+        {reservedSelected && (
+          <section>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Re-entry payment</p>
+            <p className="mt-2 text-secondary">Re-entry Payer</p>
+            <p className="text-cream">{selectedNode.source_is_root ? "ROOT" : selectedNode.user?.referral_code ?? "—"}</p>
+            <p className="mt-2 text-secondary">New Global Parent</p>
+            <p className="text-cream">{walletTail(newParentUser?.wallet) ?? globalParent?.user?.referral_code ?? "—"}</p>
+            <p className="mt-2 text-secondary">Recipient Wallet</p>
+            <p className="font-mono text-xs text-cream">{newParentUser?.wallet ? shortAddr(newParentUser.wallet) : "—"}</p>
+            <p className="mt-2 text-secondary">Plan</p>
+            <p className="text-cream">{planLabel(planId) ?? "—"}</p>
+            <p className="mt-2 text-secondary">Amount</p>
+            <p className="text-cream">{planLabel(planId) ?? "—"}</p>
+            <p className="mt-2 text-secondary">Payment Status</p>
+            <p className="text-warning">PAYMENT REQUIRED / RESERVED</p>
+          </section>
+        )}
+        <section>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Historical / Legacy</p>
+          <p className="mt-2 text-xs text-secondary">{LEGACY_PLACEMENT_NOTE}</p>
+          <p className="mt-3 text-secondary">Historical Placement</p>
+          <p className="mt-1 text-secondary">Parent</p>
+          <p className="text-cream">
+            {historicalParent ? walletTail(userById.get(historicalParent.user_id)?.wallet) ?? historicalParent.user?.referral_code : persistedRow?.parent_id ? "—" : persistedRow ? "Root" : "—"}
+          </p>
+          <p className="mt-2 text-secondary">Leg</p>
+          <p className="text-cream">{persistedRow?.position ?? "—"}</p>
+          {placementDate && (
             <>
-              <p className="mt-2 text-secondary">Historical Recipient</p>
-              <p className="font-mono text-xs text-cream">{shortAddr(historicalRecipient)}</p>
+              <p className="mt-2 text-secondary">Date</p>
+              <p className="text-cream">{new Date(placementDate).toLocaleString()}</p>
             </>
           )}
-          {historicalTx && (
+          <p className="mt-2 text-secondary">Confirmed Payment Recipient</p>
+          <p className="font-mono text-xs text-cream">{historicalRecipient ? shortAddr(historicalRecipient) : "—"}</p>
+          {historicalTx ? (
             <>
               <p className="mt-2 text-secondary">Tx Hash</p>
               <a className="inline-flex items-center gap-1 font-mono text-[11px] text-electric no-underline" href={explorerTxUrl(historicalTx)} target="_blank" rel="noreferrer">
@@ -512,17 +576,12 @@ export function GlobalNetworkTree({
                 <ExternalLink className="h-3 w-3" />
               </a>
             </>
-          )}
-          {placementDate && (
+          ) : (
             <>
-              <p className="mt-2 text-secondary">Placement Date</p>
-              <p className="text-cream">{new Date(placementDate).toLocaleString()}</p>
+              <p className="mt-2 text-secondary">Tx Hash</p>
+              <p className="text-mute">—</p>
             </>
           )}
-          <p className="mt-3 text-secondary">LEFT child</p>
-          <p className="text-cream">{leftChild?.user?.referral_code ?? "Empty"}</p>
-          <p className="mt-2 text-secondary">RIGHT child</p>
-          <p className="text-cream">{rightChild?.user?.referral_code ?? "Empty"}</p>
         </section>
         <section>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Plan</p>
@@ -579,8 +638,9 @@ export function GlobalNetworkTree({
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
+          <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-violet">{CURRENT_PLACEMENT_MODEL_LABEL}</p>
           <p className="mt-1 max-w-xl text-sm text-secondary">
-            First-empty Global placement (top to bottom, LEFT then RIGHT). Sponsor is shown in node details, not as a tree edge.
+            First-empty Global placement (top to bottom, LEFT then RIGHT). Persisted historical seats stay in detail, not as the current-rule layout.
           </p>
         </div>
       </div>
@@ -601,7 +661,7 @@ export function GlobalNetworkTree({
                 <StatusBadge status={statusOf(selectedNode)} />
                 {selectedLegacy && (
                   <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-warning" title={LEGACY_PLACEMENT_NOTE}>
-                    Legacy
+                    Legacy record
                   </span>
                 )}
               </div>
@@ -696,6 +756,7 @@ export function GlobalNetworkTree({
               </select>
             </label>
             <span className="rounded-lg border border-line bg-elevated px-2.5 py-2 text-[11px] text-mute">Binary (Left → Right)</span>
+            <span className="rounded-lg border border-violet/30 bg-violet/10 px-2.5 py-2 text-[11px] text-cream">{CURRENT_PLACEMENT_MODEL_LABEL}</span>
           </div>
         </div>
 
@@ -772,6 +833,7 @@ export function GlobalNetworkTree({
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
                           legacy={Boolean(p.vis.node && legacyIds.has(p.vis.node.id))}
+                          planId={planId}
                         />
                       ))}
                     </div>
@@ -795,8 +857,8 @@ export function GlobalNetworkTree({
                   <span className="h-2 w-4 border border-dashed border-warning" /> RESERVED
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="rounded px-1 text-[8px] font-bold uppercase text-warning">Legacy</span>
-                  confirmed under a previous placement rule
+                  <span className="rounded px-1 text-[8px] font-bold uppercase text-warning">Legacy record</span>
+                  persisted historical seat; not the current-rule layout
                 </span>
                 <span className="inline-flex items-center gap-1.5">HISTORY lives in the detail timeline</span>
               </div>

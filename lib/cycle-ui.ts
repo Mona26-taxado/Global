@@ -1,4 +1,4 @@
-import { findFirstEmptyPlacement, occupiesSlot, type Node } from "@/network/placement";
+import { cycleComplete, findFirstEmptyPlacement, occupiesSlot, type Node } from "@/network/placement";
 
 export function routingLabel(role?: string | null, slot?: number | null) {
   if (role === "SPONSOR" || slot === 1) return "DIRECT FIRST";
@@ -19,11 +19,15 @@ export type NetNode = {
   started_at?: string;
   recipient_wallet?: string | null;
   reentry_tx_hash?: string | null;
+  from_position_id?: string | null;
+  source_is_root?: boolean;
   user?: { id?: string; referral_code: string; display_name: string; is_demo: boolean };
 };
 
 export const LEGACY_PLACEMENT_NOTE =
-  "Created under a previous Global placement rule. Historical confirmed payment and position are preserved.";
+  "This position was created under a previous placement rule and is preserved for transaction history.";
+
+export const CURRENT_PLACEMENT_MODEL_LABEL = "Current Placement Model";
 
 type LockTx = {
   user_id: string;
@@ -108,4 +112,91 @@ export function legacyPlacementIds(tree: NetNode[], txs: LockTx[], refs: LockRef
 export function parentOf(tree: NetNode[], node: NetNode | undefined) {
   if (!node?.parent_id) return null;
   return tree.find((n) => n.id === node.parent_id) ?? null;
+}
+
+function chronoActive(nodes: NetNode[]): NetNode[] {
+  return nodes
+    .filter((n) => (n.status ?? "ACTIVE") === "ACTIVE")
+    .sort((a, b) => {
+      const ta = a.started_at ?? "";
+      const tb = b.started_at ?? "";
+      if (ta !== tb) return ta.localeCompare(tb);
+      if (a.depth !== b.depth) return a.depth - b.depth;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+/**
+ * Read-only visualization of the current first-empty rule applied to existing ACTIVE seats.
+ * Does not mutate persisted parent_id. Unpaid re-entry is shown only when a cycle is complete.
+ */
+export function logicalCurrentTree(persisted: NetNode[]): NetNode[] {
+  const live = persisted.filter((n) => !n.user?.is_demo);
+  const out: NetNode[] = [];
+
+  const occupy = () => out.map(asAllocatorNode);
+
+  const addReserved = (from: NetNode) => {
+    if (out.some((n) => n.user_id === from.user_id && n.status === "RESERVED")) return;
+    const apiReserved = live.find((p) => p.user_id === from.user_id && p.status === "RESERVED");
+    const hole = findFirstEmptyPlacement(occupy(), from.user_id);
+    out.push({
+      ...(apiReserved ?? from),
+      id: apiReserved?.id ?? `logical_reserved_${from.id}`,
+      parent_id: hole.parent_id,
+      position: hole.position,
+      depth: hole.depth,
+      cycle: Math.floor(hole.depth / 2),
+      status: "RESERVED",
+      from_position_id: from.id,
+      source_is_root: !from.parent_id,
+      reentry_tx_hash: apiReserved?.reentry_tx_hash ?? null,
+    });
+  };
+
+  const maybeReserveAncestors = (child: NetNode) => {
+    let parentId = child.parent_id;
+    while (parentId) {
+      const parentPos = out.find((p) => p.id === parentId);
+      if (!parentPos) return;
+      if ((parentPos.status ?? "ACTIVE") === "ACTIVE" && cycleComplete(occupy(), parentPos.id)) {
+        addReserved(parentPos);
+      }
+      parentId = parentPos.parent_id;
+    }
+  };
+
+  for (const n of chronoActive(live)) {
+    const hole = findFirstEmptyPlacement(occupy(), n.user_id);
+    const placed: NetNode = {
+      ...n,
+      parent_id: hole.parent_id,
+      position: hole.position,
+      depth: hole.depth,
+      cycle: Math.floor(hole.depth / 2),
+      status: "ACTIVE",
+    };
+    out.push(placed);
+    maybeReserveAncestors(placed);
+  }
+
+  for (const r of live.filter((p) => p.status === "RESERVED")) {
+    if (out.some((n) => n.user_id === r.user_id && n.status === "RESERVED")) continue;
+    const current = out.find((n) => n.user_id === r.user_id && (n.status ?? "ACTIVE") === "ACTIVE");
+    if (current && cycleComplete(occupy(), current.id)) addReserved(current);
+  }
+
+  return out;
+}
+
+/** Persisted ACTIVE seats whose stored parent/side differ from the current-rule visualization. */
+export function legacyRecordIds(persisted: NetNode[], logical: NetNode[]): Set<string> {
+  const ids = new Set<string>();
+  for (const row of persisted) {
+    if ((row.status ?? "ACTIVE") !== "ACTIVE") continue;
+    const vis = logical.find((n) => n.id === row.id && (n.status ?? "ACTIVE") === "ACTIVE");
+    if (!vis) continue;
+    if (vis.parent_id !== row.parent_id || sideOf(vis) !== sideOf(row)) ids.add(row.id);
+  }
+  return ids;
 }
