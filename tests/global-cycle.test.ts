@@ -172,12 +172,12 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const cRef = await assignSponsor("user_c", "GXCCCCCC");
     expect(cRef.direct_number).toBe(2);
     const cPay = await resolvePlanRecipient("user_c", "PLAN_100");
-    expect(cPay.recipientUserId).toBe("user_x");
+    expect(cPay.recipientUserId).toBe("user_a");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_y")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_x")?.id,
+      currentPosition(store.network_positions, "user_a")?.id,
     );
-    expect(currentPosition(store.network_positions, "user_y")?.position).toBe("LEFT");
+    expect(currentPosition(store.network_positions, "user_y")?.position).toBe("RIGHT");
 
     await confirmPlan("user_z", "Z");
     const dRef = await assignSponsor("user_d", "GXDDDDDD");
@@ -188,12 +188,12 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const eRef = await assignSponsor("user_e", "GXDDDDDD");
     expect(eRef.direct_number).toBe(2);
     const ePay = await resolvePlanRecipient("user_e", "PLAN_100");
-    expect(ePay.recipientUserId).toBe("user_y");
+    expect(ePay.recipientUserId).toBe("user_x");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_z")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_y")?.id,
+      currentPosition(store.network_positions, "user_x")?.id,
     );
-    expect(currentPosition(store.network_positions, "user_z")?.position).toBe("LEFT");
+    expect(currentPosition(store.network_positions, "user_z")?.position).toBe("RIGHT");
 
     expect(store.users.find((u) => u.id === "user_y")?.sponsor_id).toBe("user_x");
     expect(store.users.find((u) => u.id === "user_z")?.sponsor_id).toBe("user_x");
@@ -210,9 +210,9 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(yPay.recipientUserId).toBe("user_x");
     expect(zPay.recipientUserId).toBe("user_a");
     expect(bPay.recipientUserId).toBe("user_y");
-    expect(cPay.recipientUserId).toBe("user_x");
+    expect(cPay.recipientUserId).toBe("user_a");
     expect(dPay.recipientUserId).toBe("user_z");
-    expect(ePay.recipientUserId).toBe("user_y");
+    expect(ePay.recipientUserId).toBe("user_x");
   });
 
   it("reserves A under X then X under Y after paid rotation", async () => {
@@ -232,19 +232,19 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const posY = currentPosition(store.network_positions, "user_y")!;
     expect(posX.parent_id).toBe(posA.id);
     expect(posX.position).toBe("LEFT");
-    expect(posY.parent_id).toBe(posX.id);
-    expect(posY.position).toBe("LEFT");
+    expect(posY.parent_id).toBe(posA.id);
+    expect(posY.position).toBe("RIGHT");
 
     const reservedA = reservedPosition(store.network_positions, "user_a");
     expect(reservedA?.status).toBe("RESERVED");
-    expect(reservedA?.parent_id).toBe(posA.id);
-    expect(reservedA?.position).toBe("RIGHT");
-    expect(reservedA?.recipient_user_id).toBe("user_a");
-    expect(reservedA?.recipient_wallet?.toLowerCase()).toBe(ADDR.A);
+    expect(reservedA?.parent_id).toBe(posX.id);
+    expect(reservedA?.position).toBe("LEFT");
+    expect(reservedA?.recipient_user_id).toBe("user_x");
+    expect(reservedA?.recipient_wallet?.toLowerCase()).toBe(ADDR.X);
     expect(posA.status ?? "ACTIVE").toBe("ACTIVE");
 
     const payA = await resolveReentryPayment("user_a");
-    expect(payA.recipientUserId).toBe("user_a");
+    expect(payA.recipientUserId).toBe("user_x");
     expect(payA.amountUsd).toBe(100);
     expect(payA.positionId).toBe(reservedA?.id);
     store = await readStore();
@@ -256,8 +256,8 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(currentPosition(store.network_positions, "user_a")?.id).toBe(reservedA?.id);
     expect(store.network_positions.find((p) => p.id === posA.id)?.status).toBe("HISTORY");
     expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
-    expect(currentPosition(store.network_positions, "user_a")?.parent_id).toBe(posA.id);
-    expect(currentPosition(store.network_positions, "user_a")?.position).toBe("RIGHT");
+    expect(currentPosition(store.network_positions, "user_a")?.parent_id).toBe(posX.id);
+    expect(currentPosition(store.network_positions, "user_a")?.position).toBe("LEFT");
   });
 
   async function fillBothLegs(parentUserId: string, leftId: string, rightId: string) {

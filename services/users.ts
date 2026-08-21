@@ -1,4 +1,4 @@
-import { cycleComplete, findPowerlinePlacement, findReentryPlacement, liveNodes } from "@/network/placement";
+import { cycleComplete, findFirstEmptyPlacement, liveNodes } from "@/network/placement";
 import { makeReferralCode, newId, readStore, supabaseEnabled, withStore } from "@/lib/store";
 import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
@@ -146,8 +146,7 @@ function insertPosition(
   },
 ): NetworkPositionRow {
   const live = activePositions(store.network_positions, extra.plan_id);
-  const placement =
-    extra.status === "RESERVED" ? findReentryPlacement(live, userId) : findPowerlinePlacement(live, userId);
+  const placement = findFirstEmptyPlacement(live, userId);
   const started = extra.started_at ?? (extra.status === "ACTIVE" ? nowIso() : null);
   const row: NetworkPositionRow = {
     id: newId("pos"),

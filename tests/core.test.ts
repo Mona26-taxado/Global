@@ -3,7 +3,7 @@ import { bothLegsFilled, cycleComplete, findPlacement, findReentryPlacement } fr
 import { amountToUnits } from "../payments/service";
 import { tokenPocketLoginParam } from "../wallet/tokenpocket/deeplink";
 
-describe("global placement (left-descending powerline)", () => {
+describe("global placement (first empty LEFT then RIGHT)", () => {
   function push(
     nodes: ReturnType<typeof findPlacement>[],
     row: ReturnType<typeof findPlacement>,
@@ -13,7 +13,7 @@ describe("global placement (left-descending powerline)", () => {
     nodes.push({ ...row, id, status });
   }
 
-  it("CASE 1: A.LEFT then descend — next is X.LEFT, not A.RIGHT", () => {
+  it("CASE 1: after A.LEFT, next is A.RIGHT", () => {
     const nodes: ReturnType<typeof findPlacement>[] = [];
     const a = findPlacement(nodes, "A");
     expect(a.parent_id).toBeNull();
@@ -23,17 +23,17 @@ describe("global placement (left-descending powerline)", () => {
     expect(x.parent_id).toBe("pos-A");
     push(nodes, x, "pos-X");
     const y = findPlacement(nodes, "Y");
-    expect(y.position).toBe("LEFT");
-    expect(y.parent_id).toBe("pos-X");
+    expect(y.position).toBe("RIGHT");
+    expect(y.parent_id).toBe("pos-A");
   });
 
-  it("CASE 2: after X.LEFT, next is Y.LEFT", () => {
+  it("CASE 2: after A.LEFT and A.RIGHT, next is X.LEFT", () => {
     const nodes: ReturnType<typeof findPlacement>[] = [];
     push(nodes, findPlacement(nodes, "A"), "pos-A");
     push(nodes, findPlacement(nodes, "X"), "pos-X");
     push(nodes, findPlacement(nodes, "Y"), "pos-Y");
     const z = findPlacement(nodes, "Z");
-    expect(z.parent_id).toBe("pos-Y");
+    expect(z.parent_id).toBe("pos-X");
     expect(z.position).toBe("LEFT");
   });
 
@@ -44,8 +44,8 @@ describe("global placement (left-descending powerline)", () => {
     expect(reserved.position).toBe("LEFT");
     push(nodes, reserved, "pos-X-reserved", "RESERVED");
     const next = findPlacement(nodes, "Y");
-    expect(next.parent_id).toBe("pos-X-reserved");
-    expect(next.position).toBe("LEFT");
+    expect(next.parent_id).toBe("pos-A");
+    expect(next.position).toBe("RIGHT");
   });
 
   it("does not treat historical seats as live attach points", () => {
@@ -131,7 +131,7 @@ describe("global placement (left-descending powerline)", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("detects both Global legs and powerline cycle complete", () => {
+  it("cycle completes only with ACTIVE LEFT and RIGHT", () => {
     const both = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0 },
       { id: "pos-L", user_id: "L", parent_id: "pos-A", position: "LEFT" as const, depth: 1 },
@@ -140,14 +140,13 @@ describe("global placement (left-descending powerline)", () => {
     expect(bothLegsFilled(both, "pos-A")).toBe(true);
     expect(cycleComplete(both, "pos-A")).toBe(true);
 
-    const powerline = [
+    const oneLegPlusDownline = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0 },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1 },
       { id: "pos-Y", user_id: "Y", parent_id: "pos-X", position: "LEFT" as const, depth: 2 },
     ];
-    expect(bothLegsFilled(powerline, "pos-A")).toBe(false);
-    expect(cycleComplete(powerline, "pos-A")).toBe(true);
-    expect(cycleComplete(powerline, "pos-X")).toBe(false);
+    expect(bothLegsFilled(oneLegPlusDownline, "pos-A")).toBe(false);
+    expect(cycleComplete(oneLegPlusDownline, "pos-A")).toBe(false);
   });
 
   it("RESERVED right child does not complete the cycle", () => {

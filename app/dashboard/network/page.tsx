@@ -119,7 +119,7 @@ export default function NetworkPage() {
           <p className="text-[11px] uppercase tracking-[0.16em] text-warning">Global Re-entry Required</p>
           <p className="mt-1 text-xs text-mute">{row.plan_code} · this plan tree only</p>
           <p className="mt-2 text-sm text-secondary">
-            Your 2-person Global cycle on this plan is complete. The next powerline seat is reserved. It becomes ACTIVE only after
+            Your 2-person Global cycle on this plan is complete. The next first-empty seat is reserved. It becomes ACTIVE only after
             blockchain verification of this payment.
           </p>
           <dl className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -286,7 +286,7 @@ export default function NetworkPage() {
           <EmptyState
             icon={GitBranch}
             title="Not in Global yet"
-            detail="Direct #1 pays your sponsor. Direct #2 places you on the powerline and pays the Global parent."
+            detail="Direct #1 pays your sponsor. Direct #2 places you on the first empty Global seat and pays the Global parent."
           />
         </div>
       )}

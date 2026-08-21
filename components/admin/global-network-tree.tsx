@@ -523,7 +523,7 @@ export function GlobalNetworkTree({
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
           <p className="mt-1 max-w-xl text-sm text-secondary">
-            Powerline Global placement (left-descending). Sponsor is shown in node details, not as a tree edge.
+            First-empty Global placement (top to bottom, LEFT then RIGHT). Sponsor is shown in node details, not as a tree edge.
           </p>
         </div>
       </div>
