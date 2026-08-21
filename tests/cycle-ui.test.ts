@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionJourney, childSlotsByParent, journeyCounts, layoutPreviousChains, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -131,11 +131,23 @@ describe("buildPositionJourney", () => {
     ]);
     expect(liveTree.every((n) => (n.status ?? "ACTIVE") !== "HISTORY")).toBe(true);
     expect(childSlotsByParent(liveTree).get("pos_938a4b2c3b7e5eb6")?.left?.id).toBe(live.id);
-    const spots = layoutPreviousChains([{ liveId: live.id, x: 400, y: 200, chain }]);
-    expect(spots).toHaveLength(1);
-    expect(spots[0]?.x).toBeLessThan(400);
-    expect(spots[0]?.y).toBeLessThan(200);
-    expect(spots[0]?.targetLiveId).toBe(live.id);
+    const display = displayForestSeats(
+      [
+        { id: "pos_938a4b2c3b7e5eb6", user_id: "e8e1", parent_id: "pos_user_6ed8e4893670db32", position: "LEFT", depth: 1, status: "ACTIVE" },
+        { id: "pos_a9e48adb3b386daa", user_id: "99ab", parent_id: "pos_user_6ed8e4893670db32", position: "RIGHT", depth: 1, status: "ACTIVE" },
+        live,
+      ],
+      rows,
+    );
+    expect(display.some((n) => n.status === "HISTORY")).toBe(true);
+    expect(liveApiSeats(display).every((n) => n.status !== "HISTORY")).toBe(true);
+    const roots = liveForestRoots(display);
+    expect(roots.map((r) => r.id)).toEqual(["pos_user_6ed8e4893670db32"]);
+    expect(roots[0]?.status).toBe("HISTORY");
+    const kids = childSlotsByParent(display);
+    expect(kids.get("pos_user_6ed8e4893670db32")?.left?.id).toBe("pos_938a4b2c3b7e5eb6");
+    expect(kids.get("pos_user_6ed8e4893670db32")?.right?.id).toBe("pos_a9e48adb3b386daa");
+    expect(kids.get("pos_938a4b2c3b7e5eb6")?.left?.id).toBe(live.id);
   });
 });
 

@@ -17,7 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { buildPositionJourney, childSlotsByParent, GHOST_H, GHOST_W, journeyCounts, layoutPreviousChains, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -199,10 +199,11 @@ function MemberCard({
   }
   const node = placed.vis.node!;
   const reserved = statusOf(node) === "RESERVED";
+  const history = statusOf(node) === "HISTORY";
   const isRoot = (!node.parent_id && !reserved) || Boolean(showAsRoot && reserved);
   const code = node.user?.referral_code ?? shortAddr(node.user_id);
   const tail = walletTail(user?.wallet);
-  const label = isRoot ? "ROOT" : reserved ? code : tail ?? code;
+  const label = isRoot || (history && !node.parent_id) ? "ROOT" : reserved ? code : history ? code : tail ?? code;
   const st = statusOf(node);
   const plan = planLabel(planId) ?? planLabel(user?.current_plan);
   return (
@@ -215,17 +216,20 @@ function MemberCard({
           ? "border-violet bg-[#0D1424] shadow-[0_0_0_1px_rgba(124,92,255,0.45),0_0_28px_rgba(124,92,255,0.28)]"
           : reserved
             ? "border-dashed border-warning bg-[#0B1220]/70 hover:border-warning"
-            : "border-line bg-[#0B1220] hover:-translate-y-0.5 hover:border-violet/35 hover:shadow-card"
+            : history
+              ? "border-dashed border-mute/50 bg-[#0B1220]/80"
+              : "border-line bg-[#0B1220] hover:-translate-y-0.5 hover:border-violet/35 hover:shadow-card"
       }`}
       style={{ left: placed.x - NODE_W / 2, top: placed.y, width: NODE_W, height: NODE_H }}
     >
       <div className="flex items-start gap-2">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${reserved ? "bg-warning/70" : "bg-gradient-to-br from-violet/80 to-electric/70"}`}>
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${reserved ? "bg-warning/70" : history ? "bg-mute/50" : "bg-gradient-to-br from-violet/80 to-electric/70"}`}>
           {initials(label)}
         </span>
         <div className="min-w-0">
           <p className="truncate font-mono text-[12px] font-semibold tracking-wide text-cream">{label}</p>
-          {phase === "now" && !reserved && <p className="text-[9px] font-semibold uppercase tracking-wide text-mint">Now</p>}
+          {history && <p className="text-[9px] font-semibold uppercase tracking-wide text-mute">Was</p>}
+          {phase === "now" && !reserved && !history && <p className="text-[9px] font-semibold uppercase tracking-wide text-mint">Now</p>}
           {phase === "next" && <p className="text-[9px] font-semibold uppercase tracking-wide text-warning">Next</p>}
           {reserved && (
             <>
@@ -304,18 +308,20 @@ export function GlobalNetworkTree({
   }, [wallets, users, userById]);
 
   const liveTree = useMemo(() => liveApiSeats(tree), [tree]);
+  const allHistoryRows = useMemo(() => [...historyByUser.values()].flat(), [historyByUser]);
+  const displayTree = useMemo(() => displayForestSeats(liveTree, allHistoryRows), [liveTree, allHistoryRows]);
   const activeRootUserIds = useMemo(
     () => new Set(liveTree.filter((n) => !n.parent_id && (n.status ?? "ACTIVE") === "ACTIVE").map((n) => n.user_id)),
     [liveTree],
   );
   const maxDepth = levels === "all" ? Infinity : levels;
-  const roots = useMemo(() => liveForestRoots(liveTree), [liveTree]);
+  const roots = useMemo(() => liveForestRoots(displayTree), [displayTree]);
 
   const visRoots = useMemo(() => {
-    const byParent = childSlotsByParent(liveTree);
+    const byParent = childSlotsByParent(displayTree);
     const visited = new Set<string>();
     return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
-  }, [liveTree, roots, maxDepth]);
+  }, [displayTree, roots, maxDepth]);
 
   const placed = useMemo(() => {
     const out: Placed[] = [];
@@ -331,9 +337,9 @@ export function GlobalNetworkTree({
   const canvasW = useMemo(() => Math.max(640, ...placed.map((p) => p.x + NODE_W), 24), [placed]);
   const canvasH = useMemo(() => Math.max(420, ...placed.map((p) => p.y + NODE_H + 40), 120), [placed]);
 
-  const selectedNode = liveTree.find((n) => n.id === selectedId) ?? null;
+  const selectedNode = displayTree.find((n) => n.id === selectedId) ?? null;
   const selectedUser = selectedNode ? userById.get(selectedNode.user_id) : undefined;
-  const globalParent = parentOf(liveTree, selectedNode ?? undefined);
+  const globalParent = parentOf(displayTree, selectedNode ?? undefined);
   const historyRows = selectedNode ? (historyByUser.get(selectedNode.user_id) ?? []) : [];
   const movedUserKey = useMemo(
     () =>
@@ -432,8 +438,8 @@ export function GlobalNetworkTree({
   const routeTx = [...memberTxs]
     .filter((t) => t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY")
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-  const leftChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
-  const rightChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
+  const leftChild = selectedNode ? displayTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
+  const rightChild = selectedNode ? displayTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
   const reservedSelected = statusOf(selectedNode ?? undefined) === "RESERVED";
   const newParentUser = globalParent ? userById.get(globalParent.user_id) : undefined;
   const journey = useMemo(
@@ -456,51 +462,6 @@ export function GlobalNetworkTree({
   );
   const counts = journeyCounts(journey);
   const previousHistory = [...historyRows].filter((p) => p.status === "HISTORY").sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? ""))).at(-1);
-  const ghostSpots = useMemo(() => {
-    return layoutPreviousChains(
-      placed.flatMap((p) => {
-        const node = p.vis.node;
-        if (!node) return [];
-        const chain = previousHistoryChain(node, historyByUser.get(node.user_id) ?? []);
-        if (!chain.length) return [];
-        return [{ liveId: node.id, x: p.x, y: p.y, chain }];
-      }),
-    );
-  }, [placed, historyByUser]);
-  const ghostShiftX = useMemo(() => {
-    if (!ghostSpots.length) return 0;
-    const minX = Math.min(...ghostSpots.map((g) => g.x - GHOST_W / 2));
-    return minX < 16 ? 16 - minX : 0;
-  }, [ghostSpots]);
-  const ghostShiftY = useMemo(() => {
-    if (!ghostSpots.length) return 0;
-    const minY = Math.min(...ghostSpots.map((g) => g.y));
-    return minY < 16 ? 16 - minY : 0;
-  }, [ghostSpots]);
-  const drawW = Math.max(
-    canvasW + ghostShiftX,
-    ...ghostSpots.map((g) => g.x + ghostShiftX + GHOST_W / 2 + 16),
-    ...placed.map((p) => p.x + ghostShiftX + NODE_W),
-  );
-  const drawH = Math.max(
-    canvasH + ghostShiftY,
-    ...ghostSpots.map((g) => g.y + ghostShiftY + GHOST_H + 16),
-    ...placed.map((p) => p.y + ghostShiftY + NODE_H + 40),
-  );
-  const movementPairs = useMemo(() => {
-    const byId = new Map<string, Placed>();
-    for (const p of placed) {
-      if (p.vis.node) byId.set(p.vis.node.id, p);
-    }
-    const pairs: { from: Placed; to: Placed }[] = [];
-    for (const p of placed) {
-      const n = p.vis.node;
-      if (!n?.from_position_id) continue;
-      const from = byId.get(n.from_position_id);
-      if (from) pairs.push({ from, to: p });
-    }
-    return pairs;
-  }, [placed]);
 
   useEffect(() => {
     if (!searchNote || !selectedNode) return;
@@ -875,8 +836,8 @@ export function GlobalNetworkTree({
                     <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} />
                   </div>
                   <TransformComponent wrapperClass="!w-full !h-[560px] lg:!h-[640px]" contentClass="p-8">
-                    <div className="relative" style={{ width: drawW, height: drawH }}>
-                      <svg className="absolute inset-0" width={drawW} height={drawH}>
+                    <div className="relative" style={{ width: canvasW, height: canvasH }}>
+                      <svg className="absolute inset-0" width={canvasW} height={canvasH}>
                         {placed.map((p) => {
                           if (p.vis.kind !== "member" || !p.vis.node) return null;
                           const kids = placed.filter((c) => {
@@ -884,13 +845,14 @@ export function GlobalNetworkTree({
                             return c.vis.key.startsWith(`${p.vis.node?.id}-empty`);
                           });
                           return kids.map((c) => {
-                            const x1 = p.x + ghostShiftX;
-                            const y1 = p.y + ghostShiftY + NODE_H;
-                            const x2 = c.x + ghostShiftX;
-                            const y2 = c.y + ghostShiftY;
+                            const x1 = p.x;
+                            const y1 = p.y + NODE_H;
+                            const x2 = c.x;
+                            const y2 = c.y;
                             const midY = (y1 + y2) / 2;
                             const isRight = c.vis.position === "RIGHT";
                             const color = isRight ? "rgba(59,130,246,0.75)" : "rgba(124,92,255,0.75)";
+                            const reservedChild = c.vis.node?.status === "RESERVED";
                             return (
                               <g key={`${p.vis.key}-${c.vis.key}`}>
                                 <path
@@ -898,7 +860,7 @@ export function GlobalNetworkTree({
                                   fill="none"
                                   stroke={color}
                                   strokeWidth="2"
-                                  strokeDasharray={c.vis.node?.status === "RESERVED" ? "6 4" : undefined}
+                                  strokeDasharray={reservedChild ? "6 4" : undefined}
                                 />
                                 {Math.abs(x2 - x1) > 20 && (
                                   <text x={(x1 + x2) / 2} y={midY - 6} textAnchor="middle" fill={color} fontSize="9" letterSpacing="0.12em">
@@ -909,59 +871,11 @@ export function GlobalNetworkTree({
                             );
                           });
                         })}
-                        {movementPairs.map(({ from, to }) => {
-                          const x1 = from.x + ghostShiftX;
-                          const y1 = from.y + ghostShiftY + NODE_H / 2;
-                          const x2 = to.x + ghostShiftX;
-                          const y2 = to.y + ghostShiftY + NODE_H / 2;
-                          return (
-                            <g key={`move-${from.vis.node?.id}-${to.vis.node?.id}`}>
-                              <path
-                                d={`M ${x1} ${y1} L ${x2} ${y2}`}
-                                fill="none"
-                                stroke="rgba(154,168,199,0.7)"
-                                strokeWidth="2"
-                                strokeDasharray="6 5"
-                                markerEnd="url(#gx-ghost-arrow)"
-                              />
-                              <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 8} textAnchor="middle" fill="rgba(154,168,199,0.9)" fontSize="9" letterSpacing="0.08em">
-                                WAS → NEXT
-                              </text>
-                            </g>
-                          );
-                        })}
-                        {ghostSpots.map((g, i) => {
-                          const chain = ghostSpots.filter((s) => s.targetLiveId === g.targetLiveId);
-                          const idx = chain.findIndex((s) => s.id === g.id);
-                          const next = chain[idx + 1];
-                          const live = placed.find((p) => p.vis.node?.id === g.targetLiveId);
-                          const fromX = g.x + ghostShiftX;
-                          const fromY = g.y + ghostShiftY + GHOST_H / 2;
-                          const toX = next ? next.x + ghostShiftX : live ? live.x + ghostShiftX - NODE_W / 2 : fromX;
-                          const toY = next ? next.y + ghostShiftY + GHOST_H / 2 : live ? live.y + ghostShiftY + NODE_H / 2 : fromY;
-                          return (
-                            <g key={`ghost-line-${g.id}-${i}`}>
-                              <path
-                                d={`M ${fromX + GHOST_W / 2} ${fromY} L ${toX} ${toY}`}
-                                fill="none"
-                                stroke="rgba(154,168,199,0.55)"
-                                strokeWidth="2"
-                                strokeDasharray="5 5"
-                                markerEnd="url(#gx-ghost-arrow)"
-                              />
-                            </g>
-                          );
-                        })}
-                        <defs>
-                          <marker id="gx-ghost-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(154,168,199,0.7)" />
-                          </marker>
-                        </defs>
                       </svg>
                       {placed.map((p) => (
                         <MemberCard
                           key={p.vis.node?.id ?? p.vis.key}
-                          placed={{ ...p, x: p.x + ghostShiftX, y: p.y + ghostShiftY }}
+                          placed={p}
                           selected={p.vis.node?.id === selectedId}
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
@@ -970,35 +884,20 @@ export function GlobalNetworkTree({
                             p.vis.node &&
                               (activeRootUserIds.has(p.vis.node.user_id) ||
                                 liveTree.some((n) => n.id === p.vis.node?.from_position_id && !n.parent_id) ||
-                                previousHistoryChain(p.vis.node, historyByUser.get(p.vis.node.user_id) ?? []).some((h) => !h.parent_id && statusOf(p.vis.node) === "RESERVED")),
+                                previousHistoryChain(p.vis.node, historyByUser.get(p.vis.node.user_id) ?? []).some(
+                                  (h) => !h.parent_id && statusOf(p.vis.node) === "RESERVED",
+                                )),
                           )}
-                          phase={p.vis.node?.status === "RESERVED" ? "next" : p.vis.node?.from_position_id ? "now" : undefined}
+                          phase={
+                            p.vis.node?.status === "RESERVED"
+                              ? "next"
+                              : p.vis.node?.status === "HISTORY"
+                                ? undefined
+                                : p.vis.node?.from_position_id
+                                  ? "now"
+                                  : undefined
+                          }
                         />
-                      ))}
-                      {ghostSpots.map((g) => (
-                        <div
-                          key={`ghost-${g.id}`}
-                          className="pointer-events-none absolute rounded-[16px] border border-dashed border-mute/50 bg-[#0B1220]/70 px-2.5 py-2"
-                          style={{
-                            left: g.x + ghostShiftX - GHOST_W / 2,
-                            top: g.y + ghostShiftY,
-                            width: GHOST_W,
-                            height: GHOST_H,
-                          }}
-                        >
-                          <p className="text-[8px] font-bold uppercase tracking-wide text-mute">Was</p>
-                          <p className="mt-0.5 truncate font-mono text-[12px] font-semibold text-cream/80">
-                            {g.row.parent_id ? g.row.parent_code ?? "PREVIOUS" : "ROOT"}
-                          </p>
-                          <div className="mt-1.5 flex items-center justify-between gap-1">
-                            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-mute">
-                              {g.row.position ?? "ROOT"}
-                            </span>
-                            <span className="rounded border border-dashed border-mute/50 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-mute">
-                              HISTORY
-                            </span>
-                          </div>
-                        </div>
                       ))}
                     </div>
                   </TransformComponent>
@@ -1021,7 +920,7 @@ export function GlobalNetworkTree({
                   <span className="h-2 w-4 border border-dashed border-warning" /> NEXT · RESERVED
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> WAS · HISTORY / re-entry
+                  <span className="h-2 w-4 border border-dashed border-mute/50" /> WAS · HISTORY (old seat in tree)
                 </span>
               </div>
             )}

@@ -31,6 +31,7 @@ export function parentOf(tree: NetNode[], node: NetNode | undefined) {
 
 export type JourneyPosition = {
   id: string;
+  user_id?: string;
   parent_id?: string | null;
   parent_code?: string | null;
   position?: string | null;
@@ -173,7 +174,13 @@ export function liveApiSeats(tree: NetNode[]): NetNode[] {
 
 export type ChildSlots = { left?: NetNode; right?: NetNode };
 
-/** Attach children by parent position id + LEFT/RIGHT. Never unique-by user_id. */
+function occupyRank(n: NetNode) {
+  const st = n.status ?? "ACTIVE";
+  if (st === "ACTIVE" || st === "RESERVED") return 2;
+  return 1;
+}
+
+/** Attach children by parent position id + LEFT/RIGHT. Live seats win over HISTORY. HISTORY does not hide ACTIVE/RESERVED. */
 export function childSlotsByParent(tree: NetNode[]): Map<string, ChildSlots> {
   const ids = new Set(tree.map((n) => n.id));
   const byParent = new Map<string, ChildSlots>();
@@ -181,9 +188,9 @@ export function childSlotsByParent(tree: NetNode[]): Map<string, ChildSlots> {
     if (!n.parent_id || !ids.has(n.parent_id)) continue;
     const slot = byParent.get(n.parent_id) ?? {};
     if (n.position === "LEFT") {
-      if (!slot.left) slot.left = n;
+      if (!slot.left || occupyRank(n) >= occupyRank(slot.left)) slot.left = n;
     } else if (n.position === "RIGHT") {
-      if (!slot.right) slot.right = n;
+      if (!slot.right || occupyRank(n) >= occupyRank(slot.right)) slot.right = n;
     }
     byParent.set(n.parent_id, slot);
   }
@@ -223,38 +230,42 @@ export function previousHistoryChain(
   return walked.reverse();
 }
 
-export const GHOST_W = 110;
-export const GHOST_H = 88;
-const GHOST_GAP = 36;
+function historyToDisplayNode(row: JourneyPosition, live: NetNode[]): NetNode {
+  const mover =
+    live.find((n) => n.from_position_id === row.id) ??
+    live.find((n) => n.user_id && n.user_id === row.user_id);
+  return {
+    id: row.id,
+    user_id: row.user_id ?? mover?.user_id ?? "",
+    parent_id: row.parent_id ?? null,
+    position: row.position ?? null,
+    depth: row.parent_id ? (mover?.depth ?? 1) : 0,
+    status: "HISTORY",
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    from_position_id: row.from_position_id,
+    plan_id: row.plan_id,
+    user: mover?.user,
+  };
+}
 
-export type GhostHistorySpot = {
-  id: string;
-  index: number;
-  x: number;
-  y: number;
-  row: JourneyPosition;
-  targetLiveId: string;
-};
-
-/** Display-only HISTORY cards. Root previous sits above-left; does not occupy LEFT/RIGHT. */
-export function layoutPreviousChains(
-  items: { liveId: string; x: number; y: number; chain: JourneyPosition[] }[],
-): GhostHistorySpot[] {
-  const spots: GhostHistorySpot[] = [];
-  for (const item of items) {
-    const n = item.chain.length;
-    item.chain.forEach((row, i) => {
-      const isRootHist = !row.parent_id;
-      spots.push({
-        id: `${item.liveId}:${row.id}`,
-        index: i + 1,
-        row,
-        targetLiveId: item.liveId,
-        x: item.x - (n - i) * (GHOST_W + GHOST_GAP),
-        y: isRootHist ? item.y - GHOST_H - 40 : item.y + 16,
-      });
-    });
+/**
+ * Live ACTIVE/RESERVED plus stored HISTORY seats that belong in the picture
+ * (from_position_id chain or missing live parent). Display-only; liveApiSeats stays unchanged.
+ */
+export function displayForestSeats(live: NetNode[], historyRows: JourneyPosition[]): NetNode[] {
+  const byId = new Map(live.map((n) => [n.id, { ...n }]));
+  const needed = new Set<string>();
+  for (const n of live) {
+    if (n.from_position_id) needed.add(n.from_position_id);
+    if (n.parent_id && !byId.has(n.parent_id)) needed.add(n.parent_id);
+    for (const h of previousHistoryChain(n, historyRows)) needed.add(h.id);
   }
-  return spots;
+  for (const row of historyRows) {
+    if ((row.status ?? "ACTIVE") !== "HISTORY") continue;
+    if (!needed.has(row.id) || byId.has(row.id)) continue;
+    byId.set(row.id, historyToDisplayNode(row, live));
+  }
+  return [...byId.values()];
 }
 
