@@ -175,6 +175,7 @@ function MemberCard({
   planId,
   onSelect,
   showAsRoot,
+  phase,
 }: {
   placed: Placed;
   selected: boolean;
@@ -182,6 +183,7 @@ function MemberCard({
   planId?: string;
   onSelect: () => void;
   showAsRoot?: boolean;
+  phase?: "now" | "next";
 }) {
   if (placed.vis.kind === "empty") {
     return (
@@ -223,6 +225,8 @@ function MemberCard({
         </span>
         <div className="min-w-0">
           <p className="truncate font-mono text-[12px] font-semibold tracking-wide text-cream">{label}</p>
+          {phase === "now" && !reserved && <p className="text-[9px] font-semibold uppercase tracking-wide text-mint">Now</p>}
+          {phase === "next" && <p className="text-[9px] font-semibold uppercase tracking-wide text-warning">Next</p>}
           {reserved && (
             <>
               <p className="truncate text-[10px] text-secondary">{code}</p>
@@ -468,12 +472,35 @@ export function GlobalNetworkTree({
     const minX = Math.min(...ghostSpots.map((g) => g.x - GHOST_W / 2));
     return minX < 16 ? 16 - minX : 0;
   }, [ghostSpots]);
+  const ghostShiftY = useMemo(() => {
+    if (!ghostSpots.length) return 0;
+    const minY = Math.min(...ghostSpots.map((g) => g.y));
+    return minY < 16 ? 16 - minY : 0;
+  }, [ghostSpots]);
   const drawW = Math.max(
     canvasW + ghostShiftX,
     ...ghostSpots.map((g) => g.x + ghostShiftX + GHOST_W / 2 + 16),
     ...placed.map((p) => p.x + ghostShiftX + NODE_W),
   );
-  const drawH = Math.max(canvasH, ...ghostSpots.map((g) => g.y + GHOST_H + 16));
+  const drawH = Math.max(
+    canvasH + ghostShiftY,
+    ...ghostSpots.map((g) => g.y + ghostShiftY + GHOST_H + 16),
+    ...placed.map((p) => p.y + ghostShiftY + NODE_H + 40),
+  );
+  const movementPairs = useMemo(() => {
+    const byId = new Map<string, Placed>();
+    for (const p of placed) {
+      if (p.vis.node) byId.set(p.vis.node.id, p);
+    }
+    const pairs: { from: Placed; to: Placed }[] = [];
+    for (const p of placed) {
+      const n = p.vis.node;
+      if (!n?.from_position_id) continue;
+      const from = byId.get(n.from_position_id);
+      if (from) pairs.push({ from, to: p });
+    }
+    return pairs;
+  }, [placed]);
 
   useEffect(() => {
     if (!searchNote || !selectedNode) return;
@@ -721,8 +748,9 @@ export function GlobalNetworkTree({
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
-          <p className="mt-1 max-w-xl text-sm text-secondary">
-            First-empty Global placement (top to bottom, LEFT then RIGHT). Sponsor is shown in node details, not as a tree edge.
+          <p className="mt-1 max-w-2xl text-sm text-secondary">
+            Existing confirmed positions remain unchanged. Previous seats stay visible as HISTORY. Current seats are ACTIVE.
+            Unpaid re-entry shows as RESERVED on the real next parent (first-empty: top to bottom, LEFT then RIGHT).
           </p>
         </div>
       </div>
@@ -857,9 +885,9 @@ export function GlobalNetworkTree({
                           });
                           return kids.map((c) => {
                             const x1 = p.x + ghostShiftX;
-                            const y1 = p.y + NODE_H;
+                            const y1 = p.y + ghostShiftY + NODE_H;
                             const x2 = c.x + ghostShiftX;
-                            const y2 = c.y;
+                            const y2 = c.y + ghostShiftY;
                             const midY = (y1 + y2) / 2;
                             const isRight = c.vis.position === "RIGHT";
                             const color = isRight ? "rgba(59,130,246,0.75)" : "rgba(124,92,255,0.75)";
@@ -881,15 +909,36 @@ export function GlobalNetworkTree({
                             );
                           });
                         })}
+                        {movementPairs.map(({ from, to }) => {
+                          const x1 = from.x + ghostShiftX;
+                          const y1 = from.y + ghostShiftY + NODE_H / 2;
+                          const x2 = to.x + ghostShiftX;
+                          const y2 = to.y + ghostShiftY + NODE_H / 2;
+                          return (
+                            <g key={`move-${from.vis.node?.id}-${to.vis.node?.id}`}>
+                              <path
+                                d={`M ${x1} ${y1} L ${x2} ${y2}`}
+                                fill="none"
+                                stroke="rgba(154,168,199,0.7)"
+                                strokeWidth="2"
+                                strokeDasharray="6 5"
+                                markerEnd="url(#gx-ghost-arrow)"
+                              />
+                              <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 8} textAnchor="middle" fill="rgba(154,168,199,0.9)" fontSize="9" letterSpacing="0.08em">
+                                WAS → NEXT
+                              </text>
+                            </g>
+                          );
+                        })}
                         {ghostSpots.map((g, i) => {
                           const chain = ghostSpots.filter((s) => s.targetLiveId === g.targetLiveId);
                           const idx = chain.findIndex((s) => s.id === g.id);
                           const next = chain[idx + 1];
                           const live = placed.find((p) => p.vis.node?.id === g.targetLiveId);
                           const fromX = g.x + ghostShiftX;
-                          const fromY = g.y + GHOST_H / 2;
+                          const fromY = g.y + ghostShiftY + GHOST_H / 2;
                           const toX = next ? next.x + ghostShiftX : live ? live.x + ghostShiftX - NODE_W / 2 : fromX;
-                          const toY = next ? next.y + GHOST_H / 2 : live ? live.y + NODE_H / 2 : fromY;
+                          const toY = next ? next.y + ghostShiftY + GHOST_H / 2 : live ? live.y + ghostShiftY + NODE_H / 2 : fromY;
                           return (
                             <g key={`ghost-line-${g.id}-${i}`}>
                               <path
@@ -912,32 +961,43 @@ export function GlobalNetworkTree({
                       {placed.map((p) => (
                         <MemberCard
                           key={p.vis.node?.id ?? p.vis.key}
-                          placed={{ ...p, x: p.x + ghostShiftX }}
+                          placed={{ ...p, x: p.x + ghostShiftX, y: p.y + ghostShiftY }}
                           selected={p.vis.node?.id === selectedId}
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
                           planId={planId}
-                          showAsRoot={Boolean(p.vis.node && activeRootUserIds.has(p.vis.node.user_id))}
+                          showAsRoot={Boolean(
+                            p.vis.node &&
+                              (activeRootUserIds.has(p.vis.node.user_id) ||
+                                liveTree.some((n) => n.id === p.vis.node?.from_position_id && !n.parent_id) ||
+                                previousHistoryChain(p.vis.node, historyByUser.get(p.vis.node.user_id) ?? []).some((h) => !h.parent_id && statusOf(p.vis.node) === "RESERVED")),
+                          )}
+                          phase={p.vis.node?.status === "RESERVED" ? "next" : p.vis.node?.from_position_id ? "now" : undefined}
                         />
                       ))}
                       {ghostSpots.map((g) => (
                         <div
                           key={`ghost-${g.id}`}
-                          className="pointer-events-none absolute rounded-[12px] border border-dashed border-mute/45 bg-[#0B1220]/55 px-2 py-1.5 opacity-80"
+                          className="pointer-events-none absolute rounded-[16px] border border-dashed border-mute/50 bg-[#0B1220]/70 px-2.5 py-2"
                           style={{
                             left: g.x + ghostShiftX - GHOST_W / 2,
-                            top: g.y,
+                            top: g.y + ghostShiftY,
                             width: GHOST_W,
                             height: GHOST_H,
                           }}
                         >
-                          <p className="text-[8px] font-bold uppercase tracking-wide text-mute">
-                            {g.row.parent_id ? "History" : "Previous"}
+                          <p className="text-[8px] font-bold uppercase tracking-wide text-mute">Was</p>
+                          <p className="mt-0.5 truncate font-mono text-[12px] font-semibold text-cream/80">
+                            {g.row.parent_id ? g.row.parent_code ?? "PREVIOUS" : "ROOT"}
                           </p>
-                          <p className="mt-0.5 truncate text-[11px] text-cream/80">
-                            {g.row.parent_id ? g.row.parent_code ?? "—" : "ROOT"}
-                          </p>
-                          <p className="text-[9px] text-mute">{g.row.position ?? "ROOT"} · HISTORY</p>
+                          <div className="mt-1.5 flex items-center justify-between gap-1">
+                            <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-mute">
+                              {g.row.position ?? "ROOT"}
+                            </span>
+                            <span className="rounded border border-dashed border-mute/50 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-mute">
+                              HISTORY
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -955,13 +1015,13 @@ export function GlobalNetworkTree({
                   <span className="h-0.5 w-5 bg-electric" /> Right Position
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-mint" /> ACTIVE
+                  <span className="h-2 w-2 rounded-full bg-mint" /> NOW · ACTIVE
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-4 border border-dashed border-warning" /> RESERVED
+                  <span className="h-2 w-4 border border-dashed border-warning" /> NEXT · RESERVED
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> Previous / HISTORY
+                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> WAS · HISTORY / re-entry
                 </span>
               </div>
             )}

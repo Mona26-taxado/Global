@@ -223,9 +223,9 @@ export function previousHistoryChain(
   return walked.reverse();
 }
 
-export const GHOST_W = 92;
-export const GHOST_H = 72;
-const GHOST_GAP = 48;
+export const GHOST_W = 110;
+export const GHOST_H = 88;
+const GHOST_GAP = 36;
 
 export type GhostHistorySpot = {
   id: string;
@@ -236,7 +236,7 @@ export type GhostHistorySpot = {
   targetLiveId: string;
 };
 
-/** Display-only HISTORY cards to the left of a live seat. Does not occupy LEFT/RIGHT. */
+/** Display-only HISTORY cards. Root previous sits above-left; does not occupy LEFT/RIGHT. */
 export function layoutPreviousChains(
   items: { liveId: string; x: number; y: number; chain: JourneyPosition[] }[],
 ): GhostHistorySpot[] {
@@ -244,13 +244,14 @@ export function layoutPreviousChains(
   for (const item of items) {
     const n = item.chain.length;
     item.chain.forEach((row, i) => {
+      const isRootHist = !row.parent_id;
       spots.push({
         id: `${item.liveId}:${row.id}`,
         index: i + 1,
         row,
         targetLiveId: item.liveId,
         x: item.x - (n - i) * (GHOST_W + GHOST_GAP),
-        y: row.parent_id ? item.y + 20 : Math.max(12, item.y - 8),
+        y: isRootHist ? item.y - GHOST_H - 40 : item.y + 16,
       });
     });
   }

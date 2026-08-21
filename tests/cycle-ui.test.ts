@@ -134,6 +134,7 @@ describe("buildPositionJourney", () => {
     const spots = layoutPreviousChains([{ liveId: live.id, x: 400, y: 200, chain }]);
     expect(spots).toHaveLength(1);
     expect(spots[0]?.x).toBeLessThan(400);
+    expect(spots[0]?.y).toBeLessThan(200);
     expect(spots[0]?.targetLiveId).toBe(live.id);
   });
 });
