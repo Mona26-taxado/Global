@@ -60,6 +60,7 @@ function defaultPlans(): PlanRow[] {
     description: p.description,
     active: true,
     enabled: true,
+    sort_order: p.sort_order,
     created_at: nowIso(),
     updated_at: nowIso(),
   }));
@@ -83,16 +84,20 @@ function emptyStore(): Store {
 function migrate(store: Store): Store {
   if (!store.registrations) store.registrations = [];
   if (!store.plans?.length) store.plans = defaultPlans();
-  store.plans = store.plans.map((p) => ({
+  store.plans = store.plans.map((p, i) => ({
     ...p,
     token: p.token ?? "USDT",
     network: p.network ?? "amoy",
     description: p.description ?? "",
     active: p.active ?? p.enabled ?? true,
     enabled: p.enabled ?? p.active ?? true,
+    sort_order: p.sort_order ?? DEFAULT_PLANS.find((d) => d.code === p.code)?.sort_order ?? i + 1,
     created_at: p.created_at ?? nowIso(),
     updated_at: p.updated_at ?? nowIso(),
   }));
+  const baseId =
+    [...store.plans].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.code.localeCompare(b.code))[0]?.id ??
+    "PLAN_100";
   store.transactions = (store.transactions ?? []).map((t) => ({
     ...t,
     payment_type: t.payment_type ?? (t.plan_code === "REGISTRATION" ? "REGISTRATION" : "PLAN_PURCHASE"),
@@ -100,6 +105,7 @@ function migrate(store: Store): Store {
   }));
   store.network_positions = (store.network_positions ?? []).map((p) => ({
     ...p,
+    plan_id: p.plan_id || baseId,
     status: p.status ?? "ACTIVE",
     started_at: p.started_at ?? nowIso(),
     ended_at: p.ended_at ?? null,

@@ -116,24 +116,28 @@ export const DEFAULT_PLANS = [
     code: "PLAN_100",
     name: "$100 PLAN",
     amount_usd: 100,
+    sort_order: 1,
     description: "GLOBAL X $100 membership plan.",
   },
   {
     code: "PLAN_200",
     name: "$200 PLAN",
     amount_usd: 200,
+    sort_order: 2,
     description: "GLOBAL X $200 membership plan.",
   },
   {
     code: "PLAN_500",
     name: "$500 PLAN",
     amount_usd: 500,
+    sort_order: 3,
     description: "GLOBAL X $500 membership plan.",
   },
   {
     code: "PLAN_1000",
     name: "$1000 PLAN",
     amount_usd: 1000,
+    sort_order: 4,
     description: "GLOBAL X $1000 membership plan.",
   },
 ];
@@ -142,7 +146,7 @@ export const DEFAULT_GLOBAL_CONFIG = {
   qualification_rule: "Direct #2 of a member with this plan ACTIVE places that member in Global.",
   global_entry_condition: "Enter Global on Direct #2. Direct #1 pays the sponsor; Direct #2 pays the new Global parent.",
   two_branch_cycle: "Each Global position has LEFT and RIGHT. Level order fills LEFT then RIGHT.",
-  placement_rule: "Deterministic BFS from the live/reserved tree: next empty LEFT, then RIGHT, then the next level. Re-entry uses the same allocator.",
-  cycle_completion: "A Global seat completes when both LEFT and RIGHT are filled.",
+  placement_rule: "Deterministic left-descending DFS (powerline) from the live/reserved tree. Re-entry uses the LEFT/first child’s next hole (LEFT then RIGHT).",
+  cycle_completion: "A Global cycle completes with two ACTIVE seats on the left frontline (LEFT + LEFT.LEFT) or with ACTIVE LEFT + RIGHT after rotation.",
   position_movement: "When both Global legs complete, the member’s current seat is history and a new active seat is opened. Old rows are never deleted.",
 };

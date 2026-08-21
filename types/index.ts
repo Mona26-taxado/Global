@@ -64,6 +64,7 @@ export type PlanRow = {
   description: string;
   active: boolean;
   enabled: boolean;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 };
@@ -104,6 +105,7 @@ export type TransactionRow = {
 export type NetworkPositionRow = {
   id: string;
   user_id: string;
+  plan_id: string;
   parent_id: string | null;
   position: "LEFT" | "RIGHT" | null;
   depth: number;

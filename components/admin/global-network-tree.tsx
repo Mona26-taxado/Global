@@ -41,6 +41,7 @@ export type CycleTx = {
   token: string;
   payment_type: string;
   plan_code: string;
+  plan_id?: string | null;
   status: string;
   recipient_role?: string | null;
   routing_slot?: number | null;
@@ -246,6 +247,7 @@ export function GlobalNetworkTree({
   loading,
   error,
   onRetry,
+  planId,
 }: {
   tree: NetNode[];
   users: CycleUser[];
@@ -255,6 +257,7 @@ export function GlobalNetworkTree({
   loading: boolean;
   error: boolean;
   onRetry: () => void;
+  planId?: string;
 }) {
   const [q, setQ] = useState("");
   const [levels, setLevels] = useState<3 | 5 | "all">(5);
@@ -272,6 +275,7 @@ export function GlobalNetworkTree({
       ended_at?: string | null;
       reentry_tx_hash?: string | null;
       recipient_wallet?: string | null;
+      plan_id?: string;
     }[]
   >([]);
   const [searchNote, setSearchNote] = useState("");
@@ -330,7 +334,10 @@ export function GlobalNetworkTree({
       ok: boolean;
       positions?: typeof historyRows;
     }>(`/api/admin/data?resource=user&id=${encodeURIComponent(selectedNode.user_id)}`).then((r) => {
-      if (!cancelled) setHistoryRows(r.ok ? (r.positions ?? []) : []);
+      if (!cancelled) {
+        const rows = r.ok ? (r.positions ?? []) : [];
+        setHistoryRows(planId ? rows.filter((p) => !("plan_id" in p) || p.plan_id === planId || !p.plan_id) : rows);
+      }
     });
     return () => {
       cancelled = true;
@@ -383,7 +390,11 @@ export function GlobalNetworkTree({
 
   const myDirect = selectedNode ? refs.find((r) => r.user_id === selectedNode.user_id) : undefined;
   const memberTxs = selectedNode
-    ? txs.filter((t) => t.user_id === selectedNode.user_id)
+    ? txs.filter(
+        (t) =>
+          t.user_id === selectedNode.user_id &&
+          (!planId || t.plan_id === planId || t.plan_code === planId),
+      )
     : [];
   const routeTx = [...memberTxs]
     .filter((t) => t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY")
@@ -512,7 +523,7 @@ export function GlobalNetworkTree({
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
           <p className="mt-1 max-w-xl text-sm text-secondary">
-            BFS Global placement (LEFT then RIGHT). Sponsor is shown in node details, not as a tree edge.
+            Powerline Global placement (left-descending). Sponsor is shown in node details, not as a tree edge.
           </p>
         </div>
       </div>

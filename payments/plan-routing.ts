@@ -2,6 +2,7 @@ import { isAddress } from "viem";
 import { activeChainId, paymentRecipient } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
 import { buyerDirectNumber, currentPosition, DIRECT_REFERRAL_LIMIT_REACHED, placeUser, qualifyForReentry, reservedPosition } from "@/services/users";
+import { isPlanUnlocked, qualifiesForPlanGlobal, basePlan } from "@/lib/plan-progress";
 import type { NetworkPositionRow } from "@/types";
 
 export class PlanRoutingError extends Error {
@@ -34,8 +35,8 @@ export function planDirectSlot(occupiedCount: number): 1 | 2 {
   );
 }
 
-export function globalParentUserId(positions: NetworkPositionRow[], sponsorUserId: string): string | null {
-  const self = currentPosition(positions, sponsorUserId);
+export function globalParentUserId(positions: NetworkPositionRow[], sponsorUserId: string, planId?: string): string | null {
+  const self = currentPosition(positions, sponsorUserId, planId);
   if (!self?.parent_id) return null;
   const parentPos = positions.find((p) => p.id === self.parent_id);
   return parentPos?.user_id ?? null;
@@ -53,10 +54,11 @@ const COMPANY_USER_ID = "user_company";
  * Company sits as Global root so a human Direct #2 always has an existing ID to sit under
  * when the tree is empty. Direct #2 still pays that upline's wallet immediately — this is not escrow.
  */
-export async function ensureCompanyRoot() {
+export async function ensureCompanyRoot(planId: string) {
   const existing = await readStore();
-  if (existing.network_positions.some((p) => (p.status ?? "ACTIVE") === "ACTIVE")) {
-    return currentPosition(existing.network_positions, COMPANY_USER_ID);
+  const inPlan = existing.network_positions.filter((p) => p.plan_id === planId);
+  if (inPlan.some((p) => (p.status ?? "ACTIVE") === "ACTIVE")) {
+    return currentPosition(existing.network_positions, COMPANY_USER_ID, planId);
   }
 
   const recipient = paymentRecipient();
@@ -95,10 +97,10 @@ export async function ensureCompanyRoot() {
   });
 
   const after = await readStore();
-  const existingPos = currentPosition(after.network_positions, COMPANY_USER_ID);
+  const existingPos = currentPosition(after.network_positions, COMPANY_USER_ID, planId);
   if (existingPos) return existingPos;
-  if (after.network_positions.some((p) => (p.status ?? "ACTIVE") === "ACTIVE")) return null;
-  return await placeUser(COMPANY_USER_ID);
+  if (after.network_positions.some((p) => p.plan_id === planId && (p.status ?? "ACTIVE") === "ACTIVE")) return null;
+  return await placeUser(COMPANY_USER_ID, planId);
 }
 
 async function requireVerifiedWallet(userId: string, code: string, message: string): Promise<`0x${string}`> {
@@ -113,6 +115,12 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
   if (!buyer) throw new PlanRoutingError("USER_NOT_FOUND", "User not found.");
 
   if (!buyer.sponsor_id) {
+    if (!isPlanUnlocked(store.plans, store.transactions, buyer.id, planId)) {
+      throw new PlanRoutingError(
+        "PLAN_LOCKED",
+        "This plan is locked until the previous plan in the configured order is ACTIVE.",
+      );
+    }
     const company = paymentRecipient();
     if (!company) throw new PlanRoutingError("RECIPIENT_NOT_CONFIGURED", "PAYMENT_RECIPIENT_ADDRESS is not set.");
     return {
@@ -144,6 +152,13 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
     );
   }
 
+  if (!isPlanUnlocked(store.plans, store.transactions, buyer.id, planId)) {
+    throw new PlanRoutingError(
+      "PLAN_LOCKED",
+      "This plan is locked until the previous plan in the configured order is ACTIVE.",
+    );
+  }
+
   let slot: 1 | 2;
   try {
     slot = buyerDirectNumber(store.referrals, store.users, buyer.id, sponsor.id);
@@ -171,9 +186,16 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
     };
   }
 
-  await ensureCompanyRoot();
-  const placed = await placeUser(sponsor.id);
-  const parentId = globalParentUserId((await readStore()).network_positions, sponsor.id);
+  await ensureCompanyRoot(planId);
+  const isBase = basePlan(store.plans)?.id === planId;
+  if (!isBase && !qualifiesForPlanGlobal(store, sponsor.id, planId, buyer.id)) {
+    throw new PlanRoutingError(
+      "WAITING_FOR_DIRECT_UPGRADES",
+      "Your sponsor is waiting for both existing directs to activate this plan before Global placement in this plan tree.",
+    );
+  }
+  const placed = await placeUser(sponsor.id, planId);
+  const parentId = globalParentUserId((await readStore()).network_positions, sponsor.id, planId);
   if (!placed.parent_id || !parentId) {
     throw new PlanRoutingError(
       "GLOBAL_UPLINE_NOT_READY",
@@ -215,10 +237,12 @@ export function currentQualifyingPlan(store: { transactions: { user_id: string; 
   return store.plans.find((p) => p.id === best.plan_id || p.code === best.plan_code) ?? null;
 }
 
-export async function resolveReentryPayment(userId: string): Promise<PlanRecipient & { planId: string; planCode: string; amountUsd: number }> {
-  const qualified = await qualifyForReentry(userId);
+export async function resolveReentryPayment(userId: string, planId?: string): Promise<PlanRecipient & { planId: string; planCode: string; amountUsd: number }> {
+  const store0 = await readStore();
+  const inferred = planId ?? reservedPosition(store0.network_positions, userId)?.plan_id ?? currentPosition(store0.network_positions, userId)?.plan_id;
+  const qualified = await qualifyForReentry(userId, inferred);
   const store = await readStore();
-  const reserved = reservedPosition(store.network_positions, userId);
+  const reserved = reservedPosition(store.network_positions, userId, inferred ?? qualified?.plan_id);
   if (!reserved || reserved.status !== "RESERVED") {
     throw new PlanRoutingError(
       "REENTRY_NOT_REQUIRED",
@@ -241,13 +265,13 @@ export async function resolveReentryPayment(userId: string): Promise<PlanRecipie
       "New Global upline wallet is not verified. Re-entry pay is blocked. Funds are not sent to the company as a substitute.",
     );
     await withStore((s) => {
-      const row = reservedPosition(s.network_positions, userId);
+      const row = reservedPosition(s.network_positions, userId, reserved.plan_id);
       if (row && !row.recipient_wallet) row.recipient_wallet = wallet;
     });
   }
-  const plan = currentQualifyingPlan(store, userId);
+  const plan = store.plans.find((p) => p.id === reserved.plan_id);
   if (!plan) {
-    throw new PlanRoutingError("NO_QUALIFYING_PLAN", "Re-entry requires an active qualifying plan. Amount is not assumed.");
+    throw new PlanRoutingError("NO_QUALIFYING_PLAN", "Re-entry requires the plan of this Global position. Amount is not assumed.");
   }
   return {
     recipient: wallet as `0x${string}`,

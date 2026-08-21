@@ -21,6 +21,8 @@ export default function AdminCyclePage() {
   const [wallets, setWallets] = useState<WalletRow[]>([]);
   const [txs, setTxs] = useState<CycleTx[]>([]);
   const [refs, setRefs] = useState<CycleRef[]>([]);
+  const [planId, setPlanId] = useState<string>("");
+  const [planRows, setPlanRows] = useState<{ id: string; code: string; name: string; amount_usd: number }[]>([]);
   const [tree, setTree] = useState<NetNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -33,10 +35,11 @@ export default function AdminCyclePage() {
       api<{ ok: boolean; rows: WalletRow[] }>("/api/admin/data?resource=wallets"),
       api<{ ok: boolean; rows: CycleTx[] }>("/api/admin/data?resource=transactions"),
       api<{ ok: boolean; rows: CycleRef[] }>("/api/admin/data?resource=referrals"),
-      api<{ ok: boolean; tree: NetNode[] }>("/api/network"),
+      api<{ ok: boolean; rows: { id: string; code: string; name: string; amount_usd: number }[] }>("/api/admin/data?resource=plans"),
+      api<{ ok: boolean; tree: NetNode[]; plan_id?: string }>(`/api/network${planId ? `?plan_id=${encodeURIComponent(planId)}` : ""}`),
     ])
-      .then(([u, w, t, r, n]) => {
-        if (!u.ok || !w.ok || !t.ok || !r.ok || !n.ok) {
+      .then(([u, w, t, r, p, n]) => {
+        if (!u.ok || !w.ok || !t.ok || !r.ok || !p.ok || !n.ok) {
           setError(true);
           return;
         }
@@ -44,11 +47,13 @@ export default function AdminCyclePage() {
         setWallets(w.rows ?? []);
         setTxs(t.rows ?? []);
         setRefs(r.rows ?? []);
+        setPlanRows(p.rows ?? []);
         setTree(n.tree ?? []);
+        if (!planId && n.plan_id) setPlanId(n.plan_id);
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, []);
+  }, [planId]);
 
   useEffect(() => {
     load();
@@ -98,6 +103,19 @@ export default function AdminCyclePage() {
         ))}
       </div>
 
+      <div className="mt-5 flex flex-wrap gap-2">
+        {planRows.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setPlanId(p.id)}
+            className={`rounded-xl border px-3 py-2 text-sm ${planId === p.id ? "border-violet bg-violet/20 text-cream" : "border-line text-secondary"}`}
+          >
+            {p.name}
+          </button>
+        ))}
+      </div>
+
       <div className="mt-5">
         <GlobalNetworkTree
           tree={tree}
@@ -108,6 +126,7 @@ export default function AdminCyclePage() {
           loading={loading}
           error={error}
           onRetry={load}
+          planId={planId}
         />
       </div>
     </AdminShell>

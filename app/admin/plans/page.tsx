@@ -16,12 +16,14 @@ type Plan = {
   amount_usd: number;
   description: string;
   active: boolean;
+  sort_order?: number;
 };
 
 export default function AdminPlans() {
   const [rows, setRows] = useState<Plan[]>([]);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("100");
+  const [sortOrder, setSortOrder] = useState("5");
   const [description, setDescription] = useState("");
 
   function load() {
@@ -44,6 +46,7 @@ export default function AdminPlans() {
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <input className={fieldClass} placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
           <input className={fieldClass} placeholder="Amount USD" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input className={fieldClass} placeholder="Display / progression order" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} />
           <input className={`${fieldClass} sm:col-span-2`} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         <Button
@@ -53,6 +56,7 @@ export default function AdminPlans() {
               create: true,
               name,
               amount_usd: Number(amount),
+              sort_order: Number(sortOrder),
               description,
             })
           }
@@ -73,6 +77,7 @@ export default function AdminPlans() {
                 <StatusBadge status={p.active ? "ACTIVE" : "INACTIVE"} />
               </div>
               <p className="mt-3 font-display text-3xl tabular">${p.amount_usd}</p>
+              <p className="text-xs text-mute">Order {p.sort_order ?? "—"}</p>
             </div>
             <div className="space-y-3 p-5">
               <p className="text-sm text-secondary">{p.description}</p>
@@ -85,6 +90,12 @@ export default function AdminPlans() {
                 className={fieldClass}
                 defaultValue={p.amount_usd}
                 onBlur={(e) => save({ id: p.id, amount_usd: Number(e.target.value) })}
+              />
+              <input
+                className={fieldClass}
+                defaultValue={p.sort_order ?? ""}
+                placeholder="Order"
+                onBlur={(e) => save({ id: p.id, sort_order: Number(e.target.value) })}
               />
               <textarea
                 className={`${fieldClass} py-3`}

@@ -8,8 +8,16 @@ import {
   usdtContract,
 } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
+import { parsePaymentType } from "@/payments/payment-type";
 import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment } from "@/payments/plan-routing";
-import { activateReservedReentry } from "@/services/users";
+import { activateReservedReentry, cycleComplete, currentPosition, reservedPosition } from "@/services/users";
+import {
+  hasConfirmedPlan,
+  isPlanUnlocked,
+  orderedPlans,
+  planViewState,
+  sponsorDirects,
+} from "@/lib/plan-progress";
 import { ChainVerifyError, verifyTokenTransfer } from "@/payments/verify";
 import { publicClient } from "@/lib/viem";
 import type { RegistrationRow, TransactionRow } from "@/types";
@@ -48,7 +56,7 @@ async function ensureRegistrationRow(userId: string): Promise<RegistrationRow> {
   });
 }
 
-export async function preparePayment(userId: string, paymentType: string, opts?: { forConfirm?: boolean }) {
+export async function preparePayment(userId: string, paymentType: string, opts?: { forConfirm?: boolean; planId?: string }) {
   if (publicNetwork() === "mainnet" && !mainnetPaymentsEnabled()) {
     throw new Error("Mainnet payments are disabled. Keep NEXT_PUBLIC_NETWORK=amoy.");
   }
@@ -79,12 +87,14 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
     };
   }
 
-  if (paymentType === "GLOBAL_REENTRY" || paymentType === "REENTRY") {
+  const parsedType = parsePaymentType(paymentType);
+  if (parsedType.kind === "GLOBAL_REENTRY") {
     const registration = await getRegistration(userId);
     if (registration?.status !== "ACTIVE") {
       throw new Error("Complete $5 registration first. Plans unlock only after registration is ACTIVE.");
     }
-    const routed = await resolveReentryPayment(userId);
+    const planId = opts?.planId ?? parsedType.planId;
+    const routed = await resolveReentryPayment(userId, planId);
     return {
       paymentType: "GLOBAL_REENTRY" as const,
       planId: routed.planId,
@@ -149,12 +159,13 @@ export async function confirmPayment(input: {
   payerWallet: string;
   paymentType: string;
   txHash: Hash;
+  planId?: string;
 }) {
   const existingEarly = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
   if (existingEarly?.status === "CONFIRMED") {
     if (existingEarly.user_id !== input.userId) throw new Error("TX_ALREADY_USED");
     if (existingEarly.payment_type === "GLOBAL_REENTRY") {
-      await activateReservedReentry(input.userId, input.txHash);
+      await activateReservedReentry(input.userId, input.txHash, existingEarly.plan_id ?? input.planId);
     }
     let registration = await getRegistration(input.userId);
     if (existingEarly.payment_type === "REGISTRATION" && registration && registration.status !== "ACTIVE") {
@@ -169,7 +180,11 @@ export async function confirmPayment(input: {
     return { transaction: existingEarly, registration };
   }
 
-  const prepared = await preparePayment(input.userId, input.paymentType, { forConfirm: true });
+  const parsedConfirm = parsePaymentType(input.paymentType);
+  const prepared = await preparePayment(input.userId, input.paymentType, {
+    forConfirm: true,
+    planId: input.planId ?? parsedConfirm.planId,
+  });
   const already = await getRegistration(input.userId);
   if (prepared.paymentType === "REGISTRATION" && already?.status === "ACTIVE") {
     const existingTx = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
@@ -257,7 +272,7 @@ export async function confirmPayment(input: {
       });
     }
     if (prepared.paymentType === "GLOBAL_REENTRY") {
-      await activateReservedReentry(input.userId, input.txHash);
+      await activateReservedReentry(input.userId, input.txHash, "planId" in prepared ? prepared.planId : undefined);
     }
     return { transaction, registration };
   } catch (error) {
@@ -307,11 +322,33 @@ export async function retryPendingRegistration(userId: string) {
 
 export async function listUserPlans(userId: string) {
   const store = await readStore();
-  return store.plans.map((plan) => {
+  const directs = sponsorDirects(store.referrals, userId);
+  return orderedPlans(store.plans).map((plan) => {
     const tx = store.transactions.find(
       (t) => t.user_id === userId && t.plan_id === plan.id && t.status === "CONFIRMED",
     );
-    return { ...plan, status: tx ? "ACTIVE" : "AVAILABLE", tx_hash: tx?.tx_hash ?? null };
+    const membership = Boolean(tx);
+    const unlocked = isPlanUnlocked(store.plans, store.transactions, userId, plan.id);
+    const pos = currentPosition(store.network_positions, userId, plan.id);
+    const reserved = reservedPosition(store.network_positions, userId, plan.id);
+    const missing = directs.filter((d) => !hasConfirmedPlan(store.transactions, d.user_id, plan.id));
+    const waiting = membership && !pos;
+    const reentryRequired = Boolean(reserved) || Boolean(pos && cycleComplete(store.network_positions, pos.id));
+    const global_status = planViewState({
+      unlocked,
+      membership,
+      globalActive: Boolean(pos),
+      reentryRequired: reentryRequired && Boolean(reserved || (pos && cycleComplete(store.network_positions, pos.id))),
+      waitingForDirects: waiting,
+    });
+    return {
+      ...plan,
+      status: membership ? "ACTIVE" : unlocked ? "AVAILABLE" : "LOCKED",
+      global_status,
+      tx_hash: tx?.tx_hash ?? null,
+      waiting_directs: waiting ? missing.length : 0,
+      waiting_of: directs.length,
+    };
   });
 }
 

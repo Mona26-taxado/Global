@@ -3,6 +3,7 @@ import { isHash } from "viem";
 import { jsonError, jsonOk } from "@/lib/http";
 import { requireUser } from "@/lib/session";
 import { PlanRoutingError } from "@/payments/plan-routing";
+import { parsePaymentType } from "@/payments/payment-type";
 import { confirmPayment } from "@/payments/service";
 import { ChainVerifyError } from "@/payments/verify";
 
@@ -13,10 +14,13 @@ export async function POST(req: NextRequest) {
     const txHash = String(body.txHash ?? "");
     if (!isHash(txHash)) return jsonError("A real transaction hash is required. Hashes are never invented.");
     const paymentType = String(body.paymentType ?? body.planCode ?? "");
+    const parsed = parsePaymentType(paymentType);
+    const planId = body.plan_id != null && String(body.plan_id) ? String(body.plan_id) : parsed.planId;
     const result = await confirmPayment({
       userId: session.userId!,
       payerWallet: session.address!,
       paymentType,
+      planId,
       txHash,
     });
     return jsonOk(result);

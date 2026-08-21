@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/utils";
 import { getInjectedProvider } from "@/wallet/dapp-browser/detect";
 import { ensurePolygon } from "@/wallet/dapp-browser/provider";
+import { parsePaymentType, paymentTypeFromTokenPocketPayload } from "@/payments/payment-type";
 
 export type PayPhase =
   | "IDLE"
@@ -116,9 +117,13 @@ export function usePay(resume?: { txHash?: string | null; paymentType?: string }
     setTxHash("");
     setPhase("PAYMENT_REQUESTED");
     try {
+      const parsed = parsePaymentType(paymentType);
+      const prepQs = parsed.planId
+        ? `/api/payments/prepare?type=${encodeURIComponent(parsed.kind)}&plan_id=${encodeURIComponent(parsed.planId)}`
+        : `/api/payments/prepare?type=${encodeURIComponent(paymentType)}`;
       const prep = await api<{
         payment: { tokenContract: string; recipient: string; amountUnits: string };
-      }>(`/api/payments/prepare?type=${paymentType}`);
+      }>(prepQs);
       if (!prep.ok || !prep.payment) {
         throw new Error(prep.error ?? "USDT testnet contract is not configured.");
       }
@@ -181,13 +186,19 @@ export function usePay(resume?: { txHash?: string | null; paymentType?: string }
     }
 
     const pending = localStorage.getItem("gx_tp_pay");
-    const type = localStorage.getItem(PAY_TYPE_KEY);
-    if (!pending || !type) return;
+    if (!pending) return;
     const startedAt = Date.now();
     const timer = setInterval(async () => {
-      const st = await api<{ status: string; result: Record<string, string> | null }>(
-        `/api/wallet/tokenpocket/status?actionId=${pending}`,
+      const st = await api<{
+        status: string;
+        result: Record<string, string> | null;
+        payload?: unknown;
+      }>(`/api/wallet/tokenpocket/status?actionId=${pending}`);
+      const type = paymentTypeFromTokenPocketPayload(
+        st.payload,
+        localStorage.getItem(PAY_TYPE_KEY) || resume?.paymentType || undefined,
       );
+      if (type) localStorage.setItem(PAY_TYPE_KEY, type);
       const hash = String(st.result?.txHash ?? st.result?.hash ?? st.result?.txid ?? "");
       if (st.status === "CALLBACK_RECEIVED" && hash.startsWith("0x")) {
         clearInterval(timer);
@@ -209,9 +220,10 @@ export function usePay(resume?: { txHash?: string | null; paymentType?: string }
   async function confirmOnServer(paymentType: string, hash: string) {
     // IMPORTANT: Registration/plan become ACTIVE only after server-side chain verification.
     for (let i = 0; i < 20; i += 1) {
+      const parsed = parsePaymentType(paymentType);
       const confirmed = await api<{ code?: string }>("/api/payments/confirm", {
         method: "POST",
-        body: JSON.stringify({ paymentType, txHash: hash }),
+        body: JSON.stringify({ paymentType, txHash: hash, plan_id: parsed.planId }),
       });
       if (confirmed.code === "PENDING" || (confirmed.error && /not mined|not readable|RPC|authenticated/i.test(confirmed.error))) {
         const me = await api<{ me?: { registration?: { status: string } } | null }>("/api/me");

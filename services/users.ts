@@ -1,9 +1,10 @@
-import { bothLegsFilled, findPlacement, liveNodes } from "@/network/placement";
+import { cycleComplete, findPlacement, findReentryPlacement, liveNodes } from "@/network/placement";
 import { makeReferralCode, newId, readStore, supabaseEnabled, withStore } from "@/lib/store";
 import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
+import { basePlan } from "@/lib/plan-progress";
 
-export { bothLegsFilled } from "@/network/placement";
+export { bothLegsFilled, cycleComplete } from "@/network/placement";
 export const DIRECT_REFERRAL_LIMIT = 2;
 export const DIRECT_REFERRAL_LIMIT_REACHED = "DIRECT_REFERRAL_LIMIT_REACHED";
 
@@ -11,12 +12,37 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-export function activePositions(positions: NetworkPositionRow[]) {
-  return liveNodes(positions);
+export function positionsForPlan(positions: NetworkPositionRow[], planId: string) {
+  return positions.filter((p) => p.plan_id === planId);
 }
 
-export function currentPosition(positions: NetworkPositionRow[], userId: string) {
-  return positions.find((p) => p.user_id === userId && (p.status ?? "ACTIVE") === "ACTIVE") ?? null;
+export function activePositions(positions: NetworkPositionRow[], planId?: string) {
+  const scoped = planId ? positionsForPlan(positions, planId) : positions;
+  return liveNodes(scoped);
+}
+
+export function currentPosition(positions: NetworkPositionRow[], userId: string, planId?: string) {
+  return (
+    positions.find(
+      (p) =>
+        p.user_id === userId &&
+        (planId ? p.plan_id === planId : true) &&
+        (p.status ?? "ACTIVE") === "ACTIVE",
+    ) ?? null
+  );
+}
+
+export function reservedPosition(positions: NetworkPositionRow[], userId: string, planId?: string) {
+  return (
+    positions.find(
+      (p) => p.user_id === userId && (planId ? p.plan_id === planId : true) && p.status === "RESERVED",
+    ) ?? null
+  );
+}
+
+function resolvePlanId(store: StoreShape, planId?: string) {
+  if (planId) return planId;
+  return basePlan(store.plans)?.id ?? store.plans[0]?.id ?? "";
 }
 
 export function sponsorDirectCount(store: Pick<StoreShape, "referrals">, sponsorId: string, exceptUserId?: string) {
@@ -114,14 +140,21 @@ export async function assignSponsor(userId: string, code: string) {
 function insertPosition(
   store: StoreShape,
   userId: string,
-  extra: Partial<NetworkPositionRow> & { status: NetworkPositionRow["status"] },
+  extra: Partial<NetworkPositionRow> & {
+    status: NetworkPositionRow["status"];
+    plan_id: string;
+    reentry_frontline_id?: string;
+  },
 ): NetworkPositionRow {
-  const live = activePositions(store.network_positions);
-  const placement = findPlacement(live, userId);
+  const live = activePositions(store.network_positions, extra.plan_id);
+  const placement = extra.reentry_frontline_id
+    ? findReentryPlacement(live, extra.reentry_frontline_id, userId)
+    : findPlacement(live, userId);
   const started = extra.started_at ?? (extra.status === "ACTIVE" ? nowIso() : null);
   const row: NetworkPositionRow = {
     id: newId("pos"),
     user_id: userId,
+    plan_id: extra.plan_id,
     parent_id: placement.parent_id,
     position: placement.position,
     depth: placement.depth,
@@ -138,12 +171,8 @@ function insertPosition(
   return row;
 }
 
-function insertActivePosition(store: StoreShape, userId: string): NetworkPositionRow {
-  return insertPosition(store, userId, { status: "ACTIVE", started_at: nowIso() });
-}
-
-export function reservedPosition(positions: NetworkPositionRow[], userId: string) {
-  return positions.find((p) => p.user_id === userId && p.status === "RESERVED") ?? null;
+function insertActivePosition(store: StoreShape, userId: string, planId: string): NetworkPositionRow {
+  return insertPosition(store, userId, { status: "ACTIVE", plan_id: planId, started_at: nowIso() });
 }
 
 function parentUserId(store: StoreShape, parentPositionId: string | null) {
@@ -157,16 +186,23 @@ function verifiedWalletAddress(store: StoreShape, userId: string | null) {
   return w?.address?.toLowerCase() ?? null;
 }
 
-export function qualifyForReentryInStore(store: StoreShape, userId: string): NetworkPositionRow | null {
-  const already = reservedPosition(store.network_positions, userId);
+export function qualifyForReentryInStore(store: StoreShape, userId: string, planId?: string): NetworkPositionRow | null {
+  const plan = resolvePlanId(store, planId ?? currentPosition(store.network_positions, userId)?.plan_id);
+  const already = reservedPosition(store.network_positions, userId, plan);
   if (already) return already;
-  const current = currentPosition(store.network_positions, userId);
+  const current = currentPosition(store.network_positions, userId, plan);
   if (!current) return null;
-  if (!bothLegsFilled(store.network_positions, current.id)) return current;
+  if (!cycleComplete(positionsForPlan(store.network_positions, plan), current.id)) return current;
+  const leftChild = positionsForPlan(store.network_positions, plan).find(
+    (p) => p.parent_id === current.id && p.position === "LEFT" && (p.status ?? "ACTIVE") === "ACTIVE",
+  );
+  if (!leftChild) return current;
   const reserved = insertPosition(store, userId, {
     status: "RESERVED",
+    plan_id: plan,
     from_position_id: current.id,
     reentry_tx_hash: null,
+    reentry_frontline_id: leftChild.id,
   });
   const recipientUserId = parentUserId(store, reserved.parent_id);
   reserved.recipient_user_id = recipientUserId;
@@ -174,12 +210,13 @@ export function qualifyForReentryInStore(store: StoreShape, userId: string): Net
   return reserved;
 }
 
-export function activateReservedReentryInStore(store: StoreShape, userId: string, txHash: string) {
-  const reserved = reservedPosition(store.network_positions, userId);
-  if (!reserved) return currentPosition(store.network_positions, userId);
+export function activateReservedReentryInStore(store: StoreShape, userId: string, txHash: string, planId?: string) {
+  const plan = resolvePlanId(store, planId ?? reservedPosition(store.network_positions, userId)?.plan_id);
+  const reserved = reservedPosition(store.network_positions, userId, plan);
+  if (!reserved) return currentPosition(store.network_positions, userId, plan);
   const old =
     store.network_positions.find((p) => p.id === reserved.from_position_id) ??
-    currentPosition(store.network_positions, userId);
+    currentPosition(store.network_positions, userId, plan);
   if (old && old.id !== reserved.id && (old.status ?? "ACTIVE") === "ACTIVE") {
     old.status = "HISTORY";
     old.ended_at = nowIso();
@@ -188,44 +225,53 @@ export function activateReservedReentryInStore(store: StoreShape, userId: string
   reserved.started_at = reserved.started_at ?? nowIso();
   reserved.ended_at = null;
   reserved.reentry_tx_hash = txHash;
+  maybeReenterAncestors(store, reserved);
   return reserved;
 }
 
-function maybeReenterParent(store: StoreShape, child: NetworkPositionRow) {
-  if (!child.parent_id) return;
-  const parentPos = store.network_positions.find((p) => p.id === child.parent_id);
-  if (!parentPos || (parentPos.status ?? "ACTIVE") !== "ACTIVE") return;
-  if (!bothLegsFilled(store.network_positions, parentPos.id)) return;
-  qualifyForReentryInStore(store, parentPos.user_id);
+function maybeReenterAncestors(store: StoreShape, child: NetworkPositionRow) {
+  let parentId = child.parent_id;
+  while (parentId) {
+    const parentPos = store.network_positions.find((p) => p.id === parentId);
+    if (!parentPos) return;
+    if ((parentPos.status ?? "ACTIVE") === "ACTIVE") {
+      if (cycleComplete(positionsForPlan(store.network_positions, child.plan_id), parentPos.id)) {
+        qualifyForReentryInStore(store, parentPos.user_id, child.plan_id);
+      }
+    }
+    parentId = parentPos.parent_id;
+  }
 }
 
-export async function placeUser(userId: string): Promise<NetworkPositionRow> {
+export async function placeUser(userId: string, planId?: string): Promise<NetworkPositionRow> {
   return withStore((store) => {
-    const existing = currentPosition(store.network_positions, userId);
+    const plan = resolvePlanId(store, planId);
+    const existing = currentPosition(store.network_positions, userId, plan);
     if (existing) return existing;
-    const row = insertActivePosition(store, userId);
-    maybeReenterParent(store, row);
+    const row = insertActivePosition(store, userId, plan);
+    maybeReenterAncestors(store, row);
     return row;
   });
 }
 
 /** Qualify + reserve next Global seat. Does not activate until re-entry payment is verified. */
-export async function qualifyForReentry(userId: string): Promise<NetworkPositionRow | null> {
-  return withStore((store) => qualifyForReentryInStore(store, userId));
+export async function qualifyForReentry(userId: string, planId?: string): Promise<NetworkPositionRow | null> {
+  return withStore((store) => qualifyForReentryInStore(store, userId, planId));
 }
 
-export async function activateReservedReentry(userId: string, txHash: string) {
-  return withStore((store) => activateReservedReentryInStore(store, userId, txHash));
+export async function activateReservedReentry(userId: string, txHash: string, planId?: string) {
+  return withStore((store) => activateReservedReentryInStore(store, userId, txHash, planId));
 }
 
 /** @deprecated use qualifyForReentry — kept name so existing callers reserve instead of free-moving. */
-export async function promoteIfGlobalLegsComplete(userId: string): Promise<NetworkPositionRow | null> {
-  return qualifyForReentry(userId);
+export async function promoteIfGlobalLegsComplete(userId: string, planId?: string): Promise<NetworkPositionRow | null> {
+  return qualifyForReentry(userId, planId);
 }
 
-export async function getNetwork() {
+export async function getNetwork(planId?: string) {
   const store = await readStore();
-  return store.network_positions
+  const plan = resolvePlanId(store, planId);
+  return positionsForPlan(store.network_positions, plan)
     .filter((p) => (p.status ?? "ACTIVE") === "ACTIVE" || p.status === "RESERVED")
     .map((p) => ({
       ...p,
@@ -233,11 +279,12 @@ export async function getNetwork() {
     }));
 }
 
-export async function getDownline(userId: string) {
+export async function getDownline(userId: string, planId?: string) {
   const store = await readStore();
-  const self = currentPosition(store.network_positions, userId);
+  const plan = resolvePlanId(store, planId);
+  const self = currentPosition(store.network_positions, userId, plan);
   if (!self) return [];
-  const live = activePositions(store.network_positions);
+  const live = activePositions(store.network_positions, plan);
   const out: NetworkPositionRow[] = [];
   const walk = (parentId: string) => {
     for (const child of live.filter((p) => p.parent_id === parentId)) {

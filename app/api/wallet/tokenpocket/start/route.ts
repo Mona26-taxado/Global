@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { jsonError, jsonOk } from "@/lib/http";
 import { activeChainId, requestAppUrl } from "@/lib/network-config";
 import { requireUser } from "@/lib/session";
+import { parsePaymentType } from "@/payments/payment-type";
 import { preparePayment } from "@/payments/service";
 import {
   createLoginAction,
@@ -30,7 +31,8 @@ export async function POST(req: NextRequest) {
       return jsonError("UNAUTHENTICATED", 401);
     }
     const paymentType = String(body.paymentType ?? "REGISTRATION");
-    const payment = await preparePayment(session.userId!, paymentType);
+    const parsed = parsePaymentType(paymentType);
+    const payment = await preparePayment(session.userId!, paymentType, { planId: parsed.planId });
     const actionId = newId("pay");
     const callbackUrl = `${origin}/api/wallet/tokenpocket/callback?actionId=${actionId}`;
     await withStore((store) => {
@@ -38,7 +40,14 @@ export async function POST(req: NextRequest) {
         action_id: actionId,
         action: "transfer",
         status: "PENDING",
-        payload: { paymentType },
+        payload: {
+          paymentType,
+          kind: payment.paymentType,
+          plan_id: "planId" in payment ? payment.planId ?? parsed.planId ?? null : parsed.planId ?? null,
+          recipient: payment.recipient,
+          positionId: payment.positionId,
+          amountUsd: payment.amountUsd,
+        },
         result: null,
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       });

@@ -20,6 +20,17 @@ export type Me = {
   email?: string;
   mobile?: string;
   plans: string[];
+  plan_views?: {
+    id: string;
+    code: string;
+    name: string;
+    amount_usd: number;
+    status: string;
+    global_status: string;
+    waiting_directs?: number;
+    waiting_of?: number;
+  }[];
+  upline_plan?: { plan_id: string; plan_code: string; name: string; amount_usd: number } | null;
   directs: number;
   active_referrals?: number;
   total_referrals?: number;
@@ -36,7 +47,20 @@ export type Me = {
     recipient_wallet: string | null;
     amount_usd: number | null;
     plan_code: string | null;
+    plan_id?: string | null;
   };
+  reentries?: {
+    required: boolean;
+    reserved: boolean;
+    plan_id: string;
+    plan_code: string;
+    position_id: string | null;
+    position?: "LEFT" | "RIGHT" | null;
+    global_parent_user_id: string | null;
+    global_parent_code?: string | null;
+    recipient_wallet: string | null;
+    amount_usd: number | null;
+  }[];
   is_demo: boolean;
 };
 

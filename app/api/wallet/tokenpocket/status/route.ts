@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
     status: row.status,
     action: row.action,
     result: row.result,
+    payload: row.payload,
     address: extractAddress(row.result),
   });
 }

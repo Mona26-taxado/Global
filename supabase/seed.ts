@@ -1,10 +1,12 @@
 import { createUser, placeUser } from "@/services/users";
 import { readStore, withStore } from "@/lib/store";
+import { basePlan } from "@/lib/plan-progress";
 
 export async function ensureDemoNetwork(count = 250) {
   const current = await readStore();
   if (current.users.filter((u) => u.is_demo).length >= count) return;
   const ids: string[] = [];
+  const baseId = basePlan(current.plans)?.id;
   for (let i = 0; i < count; i += 1) {
     const user = await createUser({ display_name: `Demo ${i + 1}`, is_demo: true, id: `demo_${i + 1}` });
     ids.push(user.id);
@@ -30,6 +32,6 @@ export async function ensureDemoNetwork(count = 250) {
         }
       }
     }
-    await placeUser(user.id);
+    await placeUser(user.id, baseId);
   }
 }

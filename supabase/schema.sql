@@ -46,6 +46,7 @@ create table if not exists plans (
   description text,
   active boolean default true,
   enabled boolean default true,
+  sort_order int default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -80,7 +81,8 @@ create table if not exists transactions (
 
 create table if not exists network_positions (
   id text primary key,
-  user_id text references users(id) unique,
+  user_id text references users(id),
+  plan_id text references plans(id),
   parent_id text,
   position text,
   depth int,
@@ -109,6 +111,8 @@ alter table plans add column if not exists description text;
 alter table plans add column if not exists active boolean default true;
 alter table plans add column if not exists created_at timestamptz default now();
 alter table plans add column if not exists updated_at timestamptz default now();
+alter table plans add column if not exists sort_order int default 0;
+alter table network_positions add column if not exists plan_id text;
 alter table network_positions add column if not exists status text default 'ACTIVE';
 alter table network_positions add column if not exists started_at timestamptz default now();
 alter table network_positions add column if not exists ended_at timestamptz;
@@ -123,8 +127,23 @@ alter table network_positions add column if not exists recipient_wallet text;
 alter table network_positions add column if not exists reentry_tx_hash text;
 alter table transactions add column if not exists position_id text;
 
--- Multiple Global seats per user (current ACTIVE + HISTORY). App state JSON is the live store.
--- Do not enforce unique(user_id) on network_positions.
+alter table network_positions drop constraint if exists network_positions_user_id_key;
+
+-- Independent seats per plan: many rows per user (ACTIVE + RESERVED + HISTORY). No unique(user_id).
+create index if not exists network_positions_plan_id_idx on network_positions (plan_id);
+create index if not exists network_positions_user_plan_idx on network_positions (user_id, plan_id);
+
+-- Existing JSON/SQL rows without plan_id attach to the lowest sort_order plan. Do not delete.
+update network_positions
+set plan_id = coalesce(
+  plan_id,
+  (select id from plans order by coalesce(sort_order, 0), code limit 1)
+)
+where plan_id is null;
+
+update plans
+set sort_order = coalesce(sort_order, 0)
+where sort_order is null;
 
 -- Browser anon key must not read these tables. Next.js uses SERVICE_ROLE (bypasses RLS).
 alter table users enable row level security;

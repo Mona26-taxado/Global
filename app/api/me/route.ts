@@ -1,10 +1,10 @@
 import { jsonOk } from "@/lib/http";
 import { getSession } from "@/lib/session";
 import { readStore } from "@/lib/store";
-import { getRegistration, retryPendingRegistration } from "@/payments/service";
-import { currentQualifyingPlan } from "@/payments/plan-routing";
+import { getRegistration, listUserPlans, retryPendingRegistration } from "@/payments/service";
 import { appUrl } from "@/lib/network-config";
-import { bothLegsFilled, currentPosition, reservedPosition } from "@/services/users";
+import { cycleComplete, currentPosition, reservedPosition } from "@/services/users";
+import { hasConfirmedPlan, orderedPlans } from "@/lib/plan-progress";
 
 export async function GET() {
   const session = await getSession();
@@ -26,23 +26,52 @@ export async function GET() {
   }
   const txs = store.transactions.filter((t) => t.user_id === user.id);
   const plans = txs.filter((t) => t.payment_type === "PLAN_PURCHASE" && t.status === "CONFIRMED").map((t) => t.plan_code);
-  const currentPos = currentPosition(store.network_positions, user.id);
-  const reserved = reservedPosition(store.network_positions, user.id);
-  const plan = currentQualifyingPlan(store, user.id);
-  const parentUser = reserved?.recipient_user_id
-    ? store.users.find((u) => u.id === reserved.recipient_user_id)
-    : null;
-  const reentry = {
-    required: Boolean(reserved) || Boolean(currentPos && bothLegsFilled(store.network_positions, currentPos.id)),
-    reserved: Boolean(reserved),
-    position_id: reserved?.id ?? null,
-    position: reserved?.position ?? null,
-    global_parent_user_id: reserved?.recipient_user_id ?? null,
-    global_parent_code: parentUser?.referral_code ?? null,
-    recipient_wallet: reserved?.recipient_wallet ?? null,
-    amount_usd: plan?.amount_usd ?? null,
-    plan_code: plan?.code ?? null,
+  const planViews = await listUserPlans(user.id);
+  const reentries = planViews
+    .filter((p) => p.global_status === "REENTRY_PAYMENT_REQUIRED")
+    .map((p) => {
+      const reserved = reservedPosition(store.network_positions, user.id, p.id);
+      const currentPos = currentPosition(store.network_positions, user.id, p.id);
+      const parentUser = reserved?.recipient_user_id
+        ? store.users.find((u) => u.id === reserved.recipient_user_id)
+        : null;
+      return {
+        required: true,
+        reserved: Boolean(reserved),
+        plan_id: p.id,
+        plan_code: p.code,
+        position_id: reserved?.id ?? null,
+        position: reserved?.position ?? null,
+        global_parent_user_id: reserved?.recipient_user_id ?? null,
+        global_parent_code: parentUser?.referral_code ?? null,
+        recipient_wallet: reserved?.recipient_wallet ?? null,
+        amount_usd: p.amount_usd,
+        legs_complete: Boolean(
+          currentPos && cycleComplete(store.network_positions.filter((n) => n.plan_id === p.id), currentPos.id),
+        ),
+      };
+    });
+  const reentry = reentries[0] ?? {
+    required: false,
+    reserved: false,
+    plan_id: null,
+    position_id: null,
+    position: null,
+    global_parent_user_id: null,
+    global_parent_code: null,
+    recipient_wallet: null,
+    amount_usd: null,
+    plan_code: null,
   };
+  const sponsor = user.sponsor_id ? store.users.find((u) => u.id === user.sponsor_id) : null;
+  const uplinePlan = sponsor
+    ? orderedPlans(store.plans).find(
+        (p) =>
+          hasConfirmedPlan(store.transactions, sponsor.id, p.id) &&
+          !hasConfirmedPlan(store.transactions, user.id, p.id) &&
+          planViews.some((v) => v.id === p.id && v.status === "AVAILABLE"),
+      )
+    : null;
   const referrals = referred.map((u) => {
     const w = store.wallets.find((x) => x.user_id === u.id);
     const reg = store.registrations.find((r) => r.user_id === u.id);
@@ -53,6 +82,7 @@ export async function GET() {
       registration_status: reg?.status ?? "NOT_PAID",
       joined: u.created_at,
       direct_number: row?.direct_number ?? null,
+      referral_code: u.referral_code,
     };
   });
   const activeReferrals = referrals.filter((r) => r.registration_status === "ACTIVE").length;
@@ -68,8 +98,13 @@ export async function GET() {
       total_referrals: referred.length,
       referrals,
       plans,
+      plan_views: planViews,
+      upline_plan: uplinePlan
+        ? { plan_id: uplinePlan.id, plan_code: uplinePlan.code, name: uplinePlan.name, amount_usd: uplinePlan.amount_usd }
+        : null,
       transactions: txs,
       reentry,
+      reentries,
       referral_link: `${appUrl()}/register?ref=${user.referral_code}`,
     },
   });

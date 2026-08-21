@@ -4,6 +4,7 @@ import { getAddress, isAddress } from "viem";
 import { activeChainId } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
 import { findPlacement } from "@/network/placement";
+import { basePlan } from "@/lib/plan-progress";
 import type { Store } from "@/lib/store";
 
 function loadEnv() {
@@ -76,7 +77,7 @@ function upsertMember(
     reg.status = "ACTIVE";
     if (!reg.activated_at) reg.activated_at = new Date().toISOString();
   }
-  const plan = store.plans.find((p) => p.code === "PLAN_100") ?? store.plans[0];
+  const plan = basePlan(store.plans) ?? store.plans.find((p) => p.code === "PLAN_100") ?? store.plans[0];
   const hasPlan = store.transactions.some(
     (t) => t.user_id === user.id && t.plan_id === plan?.id && t.status === "CONFIRMED",
   );
@@ -102,11 +103,12 @@ function upsertMember(
   }
   if (input.role === "global") {
     const existing = store.network_positions.find(
-      (p) => p.user_id === user!.id && (p.status ?? "ACTIVE") === "ACTIVE",
+      (p) => p.user_id === user!.id && p.plan_id === plan.id && (p.status ?? "ACTIVE") === "ACTIVE",
     );
     if (!existing) {
       const livePositions = store.network_positions.filter((p) => {
         if ((p.status ?? "ACTIVE") !== "ACTIVE") return false;
+        if (p.plan_id !== plan.id) return false;
         const owner = store.users.find((u) => u.id === p.user_id);
         return owner && !owner.is_demo;
       });
@@ -114,6 +116,7 @@ function upsertMember(
       store.network_positions.push({
         id: placement.id,
         user_id: user.id,
+        plan_id: plan.id,
         parent_id: placement.parent_id,
         position: placement.position,
         depth: placement.depth,
@@ -147,12 +150,13 @@ async function main() {
     return { referral, global };
   });
   const after = await readStore();
-  const pos = after.network_positions.find((p) => p.user_id === global.id);
+  const pos = after.network_positions.find((p) => p.user_id === global.id && p.plan_id === (basePlan(after.plans)?.id ?? p.plan_id));
   console.log("Referral wallet:", REFERRAL_WALLET);
   console.log("Referral code:", referral.referral_code);
   console.log("Share: /register?ref=" + referral.referral_code);
   console.log("Global wallet:", GLOBAL_WALLET);
   console.log("Global code:", global.referral_code);
+  console.log("Global plan_id:", pos?.plan_id ?? "MISSING");
   console.log("Global placement:", pos ? `${pos.position ?? "ROOT"} parent=${pos.parent_id ?? "none"}` : "MISSING");
 }
 

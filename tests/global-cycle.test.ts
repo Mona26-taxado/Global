@@ -47,6 +47,7 @@ function emptyPayload() {
         description: "",
         active: true,
         enabled: true,
+        sort_order: 1,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
       },
@@ -171,12 +172,12 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const cRef = await assignSponsor("user_c", "GXCCCCCC");
     expect(cRef.direct_number).toBe(2);
     const cPay = await resolvePlanRecipient("user_c", "PLAN_100");
-    expect(cPay.recipientUserId).toBe("user_a");
+    expect(cPay.recipientUserId).toBe("user_x");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_y")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_a")?.id,
+      currentPosition(store.network_positions, "user_x")?.id,
     );
-    expect(currentPosition(store.network_positions, "user_y")?.position).toBe("RIGHT");
+    expect(currentPosition(store.network_positions, "user_y")?.position).toBe("LEFT");
 
     await confirmPlan("user_z", "Z");
     const dRef = await assignSponsor("user_d", "GXDDDDDD");
@@ -187,12 +188,12 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const eRef = await assignSponsor("user_e", "GXDDDDDD");
     expect(eRef.direct_number).toBe(2);
     const ePay = await resolvePlanRecipient("user_e", "PLAN_100");
-    expect(ePay.recipientUserId).toBe("user_x");
+    expect(ePay.recipientUserId).toBe("user_y");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_z")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_x")?.id,
+      currentPosition(store.network_positions, "user_y")?.id,
     );
-    expect(currentPosition(store.network_positions, "user_z")?.position).toBe("RIGHT");
+    expect(currentPosition(store.network_positions, "user_z")?.position).toBe("LEFT");
 
     expect(store.users.find((u) => u.id === "user_y")?.sponsor_id).toBe("user_x");
     expect(store.users.find((u) => u.id === "user_z")?.sponsor_id).toBe("user_x");
@@ -209,9 +210,70 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(yPay.recipientUserId).toBe("user_x");
     expect(zPay.recipientUserId).toBe("user_a");
     expect(bPay.recipientUserId).toBe("user_y");
-    expect(cPay.recipientUserId).toBe("user_a");
+    expect(cPay.recipientUserId).toBe("user_x");
     expect(dPay.recipientUserId).toBe("user_z");
-    expect(ePay.recipientUserId).toBe("user_x");
+    expect(ePay.recipientUserId).toBe("user_y");
+  });
+
+  it("reserves A under X then X under Y after paid rotation", async () => {
+    await member("user_a", "GXAAAAAA", "A");
+    await member("user_x", "GXBBBBBB", "X");
+    await member("user_y", "GXCCCCCC", "Y");
+    await confirmPlan("user_a", "A");
+    await confirmPlan("user_x", "X");
+    await confirmPlan("user_y", "Y");
+    await placeUser("user_a");
+    await placeUser("user_x");
+    await placeUser("user_y");
+
+    let store = await readStore();
+    const posA = currentPosition(store.network_positions, "user_a")!;
+    const posX = currentPosition(store.network_positions, "user_x")!;
+    const posY = currentPosition(store.network_positions, "user_y")!;
+    expect(posX.parent_id).toBe(posA.id);
+    expect(posX.position).toBe("LEFT");
+    expect(posY.parent_id).toBe(posX.id);
+    expect(posY.position).toBe("LEFT");
+
+    const reservedA = reservedPosition(store.network_positions, "user_a");
+    expect(reservedA?.status).toBe("RESERVED");
+    expect(reservedA?.parent_id).toBe(posX.id);
+    expect(reservedA?.position).toBe("RIGHT");
+    expect(reservedA?.recipient_user_id).toBe("user_x");
+    expect(reservedA?.recipient_wallet?.toLowerCase()).toBe(ADDR.X);
+    expect(posA.status ?? "ACTIVE").toBe("ACTIVE");
+
+    const payA = await resolveReentryPayment("user_a");
+    expect(payA.recipientUserId).toBe("user_x");
+    expect(payA.amountUsd).toBe(100);
+    expect(payA.positionId).toBe(reservedA?.id);
+    store = await readStore();
+    expect(currentPosition(store.network_positions, "user_a")?.id).toBe(posA.id);
+    expect(reservedPosition(store.network_positions, "user_a")?.status).toBe("RESERVED");
+
+    await activateReservedReentry("user_a", "0xA-reenter");
+    store = await readStore();
+    expect(currentPosition(store.network_positions, "user_a")?.id).toBe(reservedA?.id);
+    expect(store.network_positions.find((p) => p.id === posA.id)?.status).toBe("HISTORY");
+    expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
+
+    const reservedX = reservedPosition(store.network_positions, "user_x");
+    expect(reservedX?.status).toBe("RESERVED");
+    expect(reservedX?.parent_id).toBe(posY.id);
+    expect(reservedX?.position).toBe("LEFT");
+    expect(reservedX?.recipient_user_id).toBe("user_y");
+    expect(reservedX?.recipient_wallet?.toLowerCase()).toBe(ADDR.Y);
+
+    const payX = await resolveReentryPayment("user_x");
+    expect(payX.recipientUserId).toBe("user_y");
+    expect(payX.amountUsd).toBe(100);
+    store = await readStore();
+    expect(currentPosition(store.network_positions, "user_x")?.id).toBe(posX.id);
+
+    await activateReservedReentry("user_x", "0xX-reenter");
+    store = await readStore();
+    expect(currentPosition(store.network_positions, "user_x")?.id).toBe(reservedX?.id);
+    expect(store.network_positions.find((p) => p.id === posX.id)?.status).toBe("HISTORY");
   });
 
   async function fillBothLegs(parentUserId: string, leftId: string, rightId: string) {
@@ -221,6 +283,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
         store.network_positions.push({
           id: `pos_${leftId}_leg`,
           user_id: leftId,
+          plan_id: parent.plan_id,
           parent_id: parent.id,
           position: "LEFT",
           depth: parent.depth + 1,
@@ -234,6 +297,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
         store.network_positions.push({
           id: `pos_${rightId}_leg`,
           user_id: rightId,
+          plan_id: parent.plan_id,
           parent_id: parent.id,
           position: "RIGHT",
           depth: parent.depth + 1,
@@ -264,6 +328,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
         description: "",
         active: true,
         enabled: true,
+        sort_order: 3,
         created_at: "2026-06-01T00:00:00.000Z",
         updated_at: "2026-06-01T00:00:00.000Z",
       });
@@ -303,7 +368,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(pay.recipientRole).toBe("GLOBAL_REENTRY");
     expect(pay.recipientUserId).toBe(reserved?.recipient_user_id);
     expect(pay.recipient.toLowerCase()).toBe((reserved?.recipient_wallet ?? "").toLowerCase());
-    expect(pay.amountUsd).toBe(500);
+    expect(pay.amountUsd).toBe(100);
     expect(pay.recipient.toLowerCase()).toBe(ADDR.X);
 
     store = await readStore();
@@ -335,7 +400,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(reserved2?.status).toBe("RESERVED");
     expect(reserved2?.id).not.toBe(active?.id);
     const pay2 = await resolveReentryPayment("user_a");
-    expect(pay2.amountUsd).toBe(500);
+    expect(pay2.amountUsd).toBe(100);
     expect(pay2.recipientUserId).toBe(reserved2?.recipient_user_id);
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_a")?.id).toBe(active?.id);

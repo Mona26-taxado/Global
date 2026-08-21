@@ -42,10 +42,22 @@ export default function NetworkPage() {
   const me = useMe();
   const reentryPay = usePay();
   const [tree, setTree] = useState<NetNode[]>([]);
+  const [planId, setPlanId] = useState<string>("");
 
   useEffect(() => {
-    api<{ tree: NetNode[] }>("/api/network").then((r) => setTree(r.tree ?? []));
-  }, [reentryPay.phase]);
+    if (planId) return;
+    const next =
+      me?.reentry?.plan_id ||
+      me?.plan_views?.find((p) => p.global_status === "GLOBAL_ACTIVE")?.id ||
+      me?.plan_views?.find((p) => p.status === "ACTIVE")?.id ||
+      "";
+    if (next) setPlanId(next);
+  }, [planId, me?.reentry?.plan_id, me?.plan_views]);
+
+  useEffect(() => {
+    const q = planId ? `?plan_id=${encodeURIComponent(planId)}` : "";
+    api<{ tree: NetNode[] }>(`/api/network${q}`).then((r) => setTree(r.tree ?? []));
+  }, [reentryPay.phase, planId]);
 
   useEffect(() => {
     if (reentryPay.phase !== "CONFIRMED") return;
@@ -64,7 +76,8 @@ export default function NetworkPage() {
   const right = useMemo(() => (self ? tree.find((n) => n.parent_id === self.id && n.position === "RIGHT") : undefined), [tree, self]);
   const txs = (me?.transactions as MyTx[] | undefined) ?? [];
   const paid = txs.filter((t) => (t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY") && t.status === "CONFIRMED");
-  const currentPlan = me?.reentry?.plan_code ?? me?.plans?.[me.plans.length - 1] ?? null;
+  const currentPlan =
+    me?.plan_views?.find((p) => p.id === planId)?.code ?? me?.reentry?.plan_code ?? me?.plans?.[me.plans.length - 1] ?? null;
   const status = positionDisplayStatus(me, self, reentryPay.phase);
   const reentryBusy = reentryPay.phase === "SUBMITTED" || reentryPay.phase === "PENDING" || reentryPay.phase === "WALLET_CONFIRMATION";
   const showVerified = reentryPay.phase === "CONFIRMED";
@@ -79,37 +92,55 @@ export default function NetworkPage() {
 
       <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Position status" value={status === "—" ? "—" : status.replaceAll("_", " ")} />
-        <StatCard label="Current plan" value={currentPlan ? currentPlan.replaceAll("_", " ") : "—"} />
         <StatCard label="Direct referrals" value={String(me?.directs ?? 0)} hint="Max 2" />
         <StatCard label="Global parent" value={parent?.user?.referral_code ?? (self ? "Root" : "—")} />
       </div>
 
-      {me?.reentry?.required && (
-        <Card className="mt-4 border-warning/40 p-5 sm:p-6">
+      {(me?.plan_views ?? []).length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {me!.plan_views!.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setPlanId(p.id)}
+              className={`rounded-xl border px-3 py-2 text-left text-sm ${planId === p.id ? "border-violet bg-violet/20 text-cream" : "border-line text-secondary"}`}
+            >
+              <span className="font-semibold">{p.name}</span>
+              <span className="mt-0.5 block text-[11px] text-mute">
+                {p.status} · {p.global_status.replaceAll("_", " ")}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {(me?.reentries ?? (me?.reentry?.required ? [me.reentry] : [])).map((row) => (
+        <Card key={row.plan_id ?? row.plan_code ?? "reentry"} className="mt-4 border-warning/40 p-5 sm:p-6">
           <p className="text-[11px] uppercase tracking-[0.16em] text-warning">Global Re-entry Required</p>
+          <p className="mt-1 text-xs text-mute">{row.plan_code} · this plan tree only</p>
           <p className="mt-2 text-sm text-secondary">
-            Both LEFT and RIGHT of your current seat are filled. The next BFS seat is reserved. It becomes ACTIVE only after
+            Your 2-person Global cycle on this plan is complete. The next powerline seat is reserved. It becomes ACTIVE only after
             blockchain verification of this payment.
           </p>
           <dl className="mt-4 grid gap-3 sm:grid-cols-2">
             <div>
               <dt className="text-[10px] uppercase tracking-[0.14em] text-mute">New Parent</dt>
               <dd className="mt-1 text-sm text-cream">
-                {me.reentry.global_parent_code ?? (me.reentry.global_parent_user_id ? shortAddr(me.reentry.global_parent_user_id) : "—")}
+                {row.global_parent_code ?? (row.global_parent_user_id ? shortAddr(row.global_parent_user_id) : "—")}
               </dd>
             </div>
             <div>
               <dt className="text-[10px] uppercase tracking-[0.14em] text-mute">Position</dt>
-              <dd className="mt-1 text-sm font-semibold text-cream">{me.reentry.position ?? "—"}</dd>
+              <dd className="mt-1 text-sm font-semibold text-cream">{row.position ?? "—"}</dd>
             </div>
             <div>
               <dt className="text-[10px] uppercase tracking-[0.14em] text-mute">Amount</dt>
-              <dd className="mt-1 text-sm tabular text-cream">{me.reentry.amount_usd != null ? `$${me.reentry.amount_usd}` : "—"}</dd>
+              <dd className="mt-1 text-sm tabular text-cream">{row.amount_usd != null ? `$${row.amount_usd}` : "—"}</dd>
             </div>
             <div>
               <dt className="text-[10px] uppercase tracking-[0.14em] text-mute">Recipient</dt>
               <dd className="mt-1 font-mono text-sm text-cream">
-                {me.reentry.recipient_wallet ? shortAddr(me.reentry.recipient_wallet) : "—"}
+                {row.recipient_wallet ? shortAddr(row.recipient_wallet) : "—"}
               </dd>
             </div>
           </dl>
@@ -130,12 +161,25 @@ export default function NetworkPage() {
           )}
           <Button
             className="mt-4"
-            onClick={() => void reentryPay.pay("GLOBAL_REENTRY")}
+            onClick={() => void reentryPay.pay(row.plan_id ? `GLOBAL_REENTRY:${row.plan_id}` : "GLOBAL_REENTRY")}
             disabled={reentryBusy || showVerified}
           >
             Pay & Activate New Position
           </Button>
         </Card>
+      ))}
+
+      {(me?.plan_views ?? []).length > 0 && (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {me!.plan_views!.map((p) => (
+            <Card key={p.id} className={`p-4 ${planId === p.id ? "border-violet/40" : ""}`}>
+              <p className="text-sm font-semibold text-cream">{p.name}</p>
+              <p className="mt-1 text-xs text-secondary">
+                {p.status} · Global {p.global_status.replaceAll("_", " ")}
+              </p>
+            </Card>
+          ))}
+        </div>
       )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -177,7 +221,10 @@ export default function NetworkPage() {
           <div className="mt-4 space-y-2">
             {paid.slice(0, 8).map((t) => (
               <div key={t.created_at + (t.plan_code ?? "") + (t.payment_type ?? "")} className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate text-secondary">{routingLabel(t.recipient_role, t.routing_slot)}</span>
+                <span className="truncate text-secondary">
+                  {routingLabel(t.recipient_role, t.routing_slot)}
+                  {t.plan_code ? ` · ${t.plan_code.replaceAll("_", " ")}` : ""}
+                </span>
                 <span className="tabular">{t.amount}</span>
               </div>
             ))}
@@ -239,7 +286,7 @@ export default function NetworkPage() {
           <EmptyState
             icon={GitBranch}
             title="Not in Global yet"
-            detail="Direct #1 pays your sponsor. Direct #2 places you with BFS and pays the Global parent."
+            detail="Direct #1 pays your sponsor. Direct #2 places you on the powerline and pays the Global parent."
           />
         </div>
       )}

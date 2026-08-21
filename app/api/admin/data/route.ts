@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   }
   const resource = req.nextUrl.searchParams.get("resource") ?? "users";
   const q = (req.nextUrl.searchParams.get("q") ?? "").toLowerCase();
+  const planFilter = req.nextUrl.searchParams.get("plan_id");
   const s = await readStore();
   const live = s.users.filter((u) => !u.is_demo);
   if (resource === "users") {
@@ -122,14 +123,35 @@ export async function GET(req: NextRequest) {
           const parentUser = parentPos ? s.users.find((x) => x.id === parentPos.user_id) : null;
           return { ...p, parent_code: parentUser?.referral_code ?? null };
         }),
-      current_position: s.network_positions.find((p) => p.user_id === id && (p.status ?? "ACTIVE") === "ACTIVE") ?? null,
+      current_position:
+        s.network_positions.find(
+          (p) =>
+            p.user_id === id &&
+            (planFilter ? p.plan_id === planFilter : true) &&
+            (p.status ?? "ACTIVE") === "ACTIVE",
+        ) ?? null,
+      positions_by_plan: s.plans.map((plan) => ({
+        plan_id: plan.id,
+        plan_code: plan.code,
+        current: s.network_positions.find((p) => p.user_id === id && p.plan_id === plan.id && (p.status ?? "ACTIVE") === "ACTIVE") ?? null,
+      })),
       current_global_parent_id: (() => {
-        const cur = s.network_positions.find((p) => p.user_id === id && (p.status ?? "ACTIVE") === "ACTIVE");
+        const cur = s.network_positions.find(
+          (p) =>
+            p.user_id === id &&
+            (planFilter ? p.plan_id === planFilter : true) &&
+            (p.status ?? "ACTIVE") === "ACTIVE",
+        );
         if (!cur?.parent_id) return null;
         return s.network_positions.find((p) => p.id === cur.parent_id)?.user_id ?? null;
       })(),
       current_global_parent_code: (() => {
-        const cur = s.network_positions.find((p) => p.user_id === id && (p.status ?? "ACTIVE") === "ACTIVE");
+        const cur = s.network_positions.find(
+          (p) =>
+            p.user_id === id &&
+            (planFilter ? p.plan_id === planFilter : true) &&
+            (p.status ?? "ACTIVE") === "ACTIVE",
+        );
         if (!cur?.parent_id) return null;
         const parentPos = s.network_positions.find((p) => p.id === cur.parent_id);
         return parentPos ? s.users.find((x) => x.id === parentPos.user_id)?.referral_code ?? null : null;
@@ -160,6 +182,7 @@ export async function POST(req: NextRequest) {
           description: String(body.description ?? ""),
           active: true,
           enabled: true,
+          sort_order: Number(body.sort_order ?? Math.max(0, ...store.plans.map((p) => p.sort_order ?? 0)) + 1),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
@@ -170,6 +193,7 @@ export async function POST(req: NextRequest) {
       if (body.name) plan.name = String(body.name);
       if (body.amount_usd !== undefined) plan.amount_usd = Number(body.amount_usd);
       if (body.description !== undefined) plan.description = String(body.description);
+      if (body.sort_order !== undefined) plan.sort_order = Number(body.sort_order);
       if (body.active !== undefined) {
         plan.active = Boolean(body.active);
         plan.enabled = plan.active;

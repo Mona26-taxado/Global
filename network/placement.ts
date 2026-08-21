@@ -21,7 +21,6 @@ export function liveNodes<T extends Node>(nodes: T[]): T[] {
   return nodes.filter(occupiesSlot);
 }
 
-/** Forest roots: no parent, or parent is not in the live set (historical parent). Prefer LEFT at the same depth. */
 export function placementRoots(nodes: Node[]): Node[] {
   const ids = new Set(nodes.map((n) => n.id));
   const roots = nodes.filter((n) => !n.parent_id || !ids.has(n.parent_id));
@@ -33,16 +32,7 @@ export function placementRoots(nodes: Node[]): Node[] {
   });
 }
 
-/**
- * Deterministic next-open Global seat.
- * Breadth-first / level-order: at each node LEFT then RIGHT, then the next level
- * (LEFT child before RIGHT child). ACTIVE and RESERVED seats occupy slots.
- */
-export function findPlacement(nodes: Node[], userId: string): Omit<Node, "user_id"> & { user_id: string } {
-  const live = liveNodes(nodes);
-  if (live.length === 0) {
-    return { id: `pos_${userId}`, user_id: userId, parent_id: null, position: null, depth: 0 };
-  }
+function childMap(live: Node[]) {
   const byParent = new Map<string, { left?: Node; right?: Node }>();
   for (const node of live) {
     if (!node.parent_id) continue;
@@ -51,32 +41,87 @@ export function findPlacement(nodes: Node[], userId: string): Omit<Node, "user_i
     if (node.position === "RIGHT") slot.right = node;
     byParent.set(node.parent_id, slot);
   }
+  return byParent;
+}
 
-  const hole = (
-    current: Node,
-    position: "LEFT" | "RIGHT",
-  ): Omit<Node, "user_id"> & { user_id: string } => ({
+type Hole = Omit<Node, "user_id"> & { user_id: string };
+
+function makeHole(current: Node, position: "LEFT" | "RIGHT", userId: string): Hole {
+  return {
     id: `pos_${userId}`,
     user_id: userId,
     parent_id: current.id,
     position,
     depth: current.depth + 1,
-  });
+  };
+}
 
+/** Left-descending DFS / powerline: never fill RIGHT until the LEFT subtree has no hole. */
+function searchPowerline(current: Node, byParent: Map<string, { left?: Node; right?: Node }>, userId: string): Hole | null {
+  const kids = byParent.get(current.id) ?? {};
+  if (!kids.left) return makeHole(current, "LEFT", userId);
+  const downLeft = searchPowerline(kids.left, byParent, userId);
+  if (downLeft) return downLeft;
+  if (!kids.right) return makeHole(current, "RIGHT", userId);
+  return searchPowerline(kids.right, byParent, userId);
+}
+
+/**
+ * Next-open Global seat for a newly qualified member.
+ * Left-descending DFS (powerline): LEFT first, then the LEFT subtree, then RIGHT.
+ * ACTIVE and RESERVED occupy slots. HISTORY does not.
+ */
+export function findPlacement(nodes: Node[], userId: string): Hole {
+  const live = liveNodes(nodes);
+  if (live.length === 0) {
+    return { id: `pos_${userId}`, user_id: userId, parent_id: null, position: null, depth: 0 };
+  }
+  const byParent = childMap(live);
   const roots = placementRoots(live);
   if (!roots.length) throw new Error("NETWORK_CORRUPT");
-  const queue = [...roots];
-  while (queue.length) {
-    const current = queue.shift()!;
-    const kids = byParent.get(current.id) ?? {};
-    if (!kids.left) return hole(current, "LEFT");
-    if (!kids.right) return hole(current, "RIGHT");
-    queue.push(kids.left, kids.right);
+  for (const root of roots) {
+    const hole = searchPowerline(root, byParent, userId);
+    if (hole) return hole;
   }
   throw new Error("NETWORK_FULL_UNEXPECTED");
+}
+
+/**
+ * Re-entry hole under the completing seat's LEFT/first child:
+ * fill that child's LEFT, then its RIGHT, then powerline in its subtrees.
+ */
+export function findReentryPlacement(nodes: Node[], frontlineId: string, userId: string): Hole {
+  const live = liveNodes(nodes);
+  const front = live.find((n) => n.id === frontlineId);
+  if (!front) throw new Error("REENTRY_FRONTLINE_MISSING");
+  const byParent = childMap(live);
+  const kids = byParent.get(front.id) ?? {};
+  if (!kids.left) return makeHole(front, "LEFT", userId);
+  if (!kids.right) return makeHole(front, "RIGHT", userId);
+  return searchPowerline(kids.left, byParent, userId) ?? searchPowerline(kids.right, byParent, userId) ?? makeHole(front, "LEFT", userId);
 }
 
 export function bothLegsFilled(nodes: Node[], parentPositionId: string) {
   const live = liveNodes(nodes).filter((n) => n.parent_id === parentPositionId);
   return live.some((n) => n.position === "LEFT") && live.some((n) => n.position === "RIGHT");
+}
+
+function activeChild(nodes: Node[], parentId: string, side: "LEFT" | "RIGHT") {
+  return nodes.find(
+    (n) => n.parent_id === parentId && n.position === side && isActiveNode(n),
+  );
+}
+
+/**
+ * Powerline 2-person cycle:
+ * ACTIVE LEFT + ACTIVE LEFT.LEFT (two on the frontline), or
+ * ACTIVE LEFT + ACTIVE RIGHT (after rotation sits on the first child's RIGHT).
+ * RESERVED does not complete a cycle, so unpaid re-entry cannot fire the next rotation.
+ */
+export function cycleComplete(nodes: Node[], parentPositionId: string) {
+  const left = activeChild(nodes, parentPositionId, "LEFT");
+  const right = activeChild(nodes, parentPositionId, "RIGHT");
+  if (left && right) return true;
+  if (left && activeChild(nodes, left.id, "LEFT")) return true;
+  return false;
 }

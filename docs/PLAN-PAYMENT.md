@@ -50,7 +50,7 @@ The user cannot edit the recipient address.
 - `payments/plan-routing.ts` — Direct #1 / Direct #2 / placement
 - `payments/service.ts` — prepare + confirm
 - `payments/verify.ts` — on-chain match of that recipient
-- `services/users.ts` — `placeUser` (BFS LEFT/RIGHT)
+- `services/users.ts` — `placeUser` (powerline LEFT-first)
 - `network/placement.ts`
 
 ## 5. Database
