@@ -17,7 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { parentOf, routingLabel, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, journeyCounts, parentOf, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -45,6 +45,7 @@ export type CycleTx = {
   status: string;
   recipient_role?: string | null;
   routing_slot?: number | null;
+  position_id?: string | null;
   tx_hash: string;
   created_at: string;
 };
@@ -207,7 +208,7 @@ function MemberCard({
   const isRoot = !node.parent_id && !reserved;
   const code = node.user?.referral_code ?? shortAddr(node.user_id);
   const tail = walletTail(user?.wallet);
-  const label = isRoot ? "ROOT" : tail ?? code;
+  const label = reserved ? code : isRoot ? "ROOT" : tail ?? code;
   const st = statusOf(node);
   const plan = planLabel(planId) ?? planLabel(user?.current_plan);
   return (
@@ -277,21 +278,15 @@ export function GlobalNetworkTree({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [legend, setLegend] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyRows, setHistoryRows] = useState<
-    {
-      id: string;
-      status?: string;
-      position?: string | null;
-      parent_id?: string | null;
-      parent_code?: string | null;
-      started_at?: string;
-      ended_at?: string | null;
-      reentry_tx_hash?: string | null;
-      recipient_wallet?: string | null;
-      plan_id?: string;
-    }[]
-  >([]);
+  const [historyRows, setHistoryRows] = useState<JourneyPosition[]>([]);
   const [searchNote, setSearchNote] = useState("");
+  const [searchStats, setSearchStats] = useState<{
+    previous: number;
+    reentries: number;
+    parent?: string;
+    position?: string | null;
+    status?: string;
+  } | null>(null);
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const userByWallet = useMemo(() => {
@@ -345,26 +340,28 @@ export function GlobalNetworkTree({
     let cancelled = false;
     api<{
       ok: boolean;
-      positions?: typeof historyRows;
+      positions?: JourneyPosition[];
     }>(`/api/admin/data?resource=user&id=${encodeURIComponent(selectedNode.user_id)}`).then((r) => {
       if (!cancelled) {
         const rows = r.ok ? (r.positions ?? []) : [];
-        setHistoryRows(planId ? rows.filter((p) => !("plan_id" in p) || p.plan_id === planId || !p.plan_id) : rows);
+        setHistoryRows(planId ? rows.filter((p) => !p.plan_id || p.plan_id === planId) : rows);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [selectedNode]);
+  }, [selectedNode?.user_id, planId]);
 
   function selectNode(node: NetNode, fromSearch = false) {
     setSelectedId(node.id);
-    setHistoryOpen(false);
+    setHistoryOpen(fromSearch);
     const parent = parentOf(liveTree, node);
     if (fromSearch) {
       const branch = node.position ? `${node.position} branch` : "root";
       const under = parent?.user?.referral_code;
       setSearchNote(under ? `Found in ${branch} under ${under}` : `Found at ${branch}`);
+    } else {
+      setSearchStats(null);
     }
     requestAnimationFrame(() => {
       document.getElementById(`gx-node-${node.id}`)?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
@@ -376,6 +373,7 @@ export function GlobalNetworkTree({
     setQ(value);
     if (!needle) {
       setSearchNote("");
+      setSearchStats(null);
       return;
     }
     const user =
@@ -397,17 +395,21 @@ export function GlobalNetworkTree({
           (n.user?.referral_code ?? "").toLowerCase().includes(needle) ||
           (n.user?.display_name ?? "").toLowerCase().includes(needle),
       );
-    if (node) selectNode(node, true);
-    else setSearchNote("No matching member in the loaded Global tree.");
+    if (node) {
+      selectNode(node, true);
+    } else {
+      setSearchNote("No matching member in the loaded Global tree.");
+      setSearchStats(null);
+    }
   }
 
   const myDirect = selectedNode ? refs.find((r) => r.user_id === selectedNode.user_id) : undefined;
+  const planTxs = useMemo(
+    () => txs.filter((t) => !planId || t.plan_id === planId || t.plan_code === planId),
+    [txs, planId],
+  );
   const memberTxs = selectedNode
-    ? txs.filter(
-        (t) =>
-          t.user_id === selectedNode.user_id &&
-          (!planId || t.plan_id === planId || t.plan_code === planId),
-      )
+    ? planTxs.filter((t) => t.user_id === selectedNode.user_id)
     : [];
   const routeTx = [...memberTxs]
     .filter((t) => t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY")
@@ -416,26 +418,88 @@ export function GlobalNetworkTree({
   const rightChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
   const reservedSelected = statusOf(selectedNode ?? undefined) === "RESERVED";
   const newParentUser = globalParent ? userById.get(globalParent.user_id) : undefined;
-  const historySorted = [...historyRows].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
+  const journey = useMemo(
+    () =>
+      buildPositionJourney(
+        historyRows,
+        planId,
+        planTxs.map((t) => ({
+          tx_hash: t.tx_hash,
+          position_id: t.position_id,
+          recipient_wallet: t.recipient_wallet,
+          status: t.status,
+          payment_type: t.payment_type,
+          amount: t.amount,
+          plan_id: t.plan_id,
+          plan_code: t.plan_code,
+        })),
+      ),
+    [historyRows, planId, planTxs],
+  );
+  const counts = journeyCounts(journey);
+  const previousHistory = [...historyRows].filter((p) => p.status === "HISTORY").sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? ""))).at(-1);
+  const selectedPlaced = selectedNode ? placed.find((p) => p.vis.node?.id === selectedNode.id) : undefined;
+  const drawW = canvasW + (selectedPlaced && previousHistory ? NODE_W + 48 : 0);
 
-  function historyBlock() {
-    if (historySorted.length === 0) return <p className="text-sm text-mute">No position history.</p>;
+  useEffect(() => {
+    if (!searchNote || !selectedNode) return;
+    setSearchStats({
+      previous: counts.previous,
+      reentries: counts.reentries,
+      parent: globalParent?.user?.referral_code ?? (selectedNode.parent_id ? undefined : "Root"),
+      position: selectedNode.position,
+      status: statusOf(selectedNode),
+    });
+  }, [searchNote, selectedNode, counts.previous, counts.reentries, globalParent]);
+
+  function journeyBlock() {
+    if (journey.length === 0) return <p className="text-sm text-mute">No stored positions for this plan.</p>;
     return (
-      <div className="space-y-3">
-        {historySorted.map((p, i) => (
-          <div key={p.id} className="relative border-l border-violet/30 pl-4">
-            <span className="absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-violet" />
-            <p className="text-sm font-semibold text-cream">Position #{i + 1}</p>
-            <p className="mt-1 text-xs text-secondary">Parent: {p.parent_code ?? (p.parent_id ? "—" : "Root")}</p>
-            <p className="text-xs text-secondary">{p.position ?? "ROOT"}</p>
-            <p className="text-[11px] text-mute">
-              {p.status === "HISTORY" ? "COMPLETED" : p.status ?? "ACTIVE"}
-              {p.started_at ? ` · ${new Date(p.started_at).toLocaleString()}` : ""}
-              {p.ended_at ? ` → ${new Date(p.ended_at).toLocaleString()}` : ""}
-            </p>
-            {p.reentry_tx_hash && <p className="font-mono text-[10px] text-mute">Tx: {shortAddr(p.reentry_tx_hash)}</p>}
-          </div>
-        ))}
+      <div className="space-y-0" id="gx-journey">
+        {journey.map((step, i) => {
+          const st = step.row.status ?? "ACTIVE";
+          const reserved = step.kind === "reentry" || st === "RESERVED";
+          return (
+            <div key={`${step.kind}-${step.row.id}-${i}`}>
+              {i > 0 && (
+                <div className="flex items-center gap-2 py-2 pl-3">
+                  <span className="h-6 w-px border-l border-dashed border-mute/50" />
+                  <span className="text-[10px] uppercase tracking-wide text-mute">↓</span>
+                </div>
+              )}
+              <div className={`rounded-xl border p-3 ${reserved ? "border-dashed border-warning/60 bg-warning/5" : st === "HISTORY" ? "border-white/10 bg-white/[0.02]" : "border-violet/30 bg-violet/5"}`}>
+                <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${reserved ? "text-warning" : st === "HISTORY" ? "text-mute" : "text-violet"}`}>
+                  {step.title}
+                </p>
+                <p className="mt-2 text-xs text-secondary">Parent: {step.row.parent_code ?? (step.row.parent_id ? "—" : "Root")}</p>
+                <p className="text-xs text-secondary">Leg: {step.row.position ?? "ROOT"}</p>
+                <p className="mt-1">
+                  <StatusBadge status={st} />
+                  {st === "HISTORY" && <span className="ml-2 text-[10px] uppercase text-mute">Previous</span>}
+                </p>
+                {step.row.started_at && (
+                  <p className="mt-1 text-[11px] text-mute">Started: {new Date(step.row.started_at).toLocaleString()}</p>
+                )}
+                {step.row.ended_at && (
+                  <p className="text-[11px] text-mute">Ended: {new Date(step.row.ended_at).toLocaleString()}</p>
+                )}
+                {planId && <p className="mt-1 text-[11px] text-secondary">Plan: {planLabel(planId)}</p>}
+                {step.payment?.recipient_wallet && (
+                  <p className="mt-1 font-mono text-[11px] text-cream">Recipient: {shortAddr(step.payment.recipient_wallet)}</p>
+                )}
+                {step.payment?.status && <p className="text-[11px] text-mute">Payment: {step.payment.status}</p>}
+                {step.payment?.tx_hash ? (
+                  <a className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] text-electric no-underline" href={explorerTxUrl(step.payment.tx_hash)} target="_blank" rel="noreferrer">
+                    Tx: {shortAddr(step.payment.tx_hash)}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : reserved ? (
+                  <p className="mt-1 text-[11px] text-warning">Tx: pending</p>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -496,19 +560,25 @@ export function GlobalNetworkTree({
         </section>
         {reservedSelected && (
           <section>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Re-entry payment</p>
-            <p className="mt-2 text-secondary">Re-entry Payer</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Re-entry (this seat)</p>
+            <p className="mt-2 text-secondary">Mover</p>
             <p className="text-cream">{selectedNode.user?.referral_code ?? "—"}</p>
-            <p className="mt-2 text-secondary">New Global Parent</p>
+            <p className="mt-2 text-secondary">Previous position</p>
+            <p className="text-cream">
+              {previousHistory
+                ? `${previousHistory.parent_code ?? (previousHistory.parent_id ? "—" : "Root")} · ${previousHistory.position ?? "ROOT"} · HISTORY`
+                : "No prior stored seat for this plan"}
+            </p>
+            <p className="mt-2 text-secondary">New reserved parent</p>
             <p className="text-cream">{walletTail(newParentUser?.wallet) ?? globalParent?.user?.referral_code ?? "—"}</p>
-            <p className="mt-2 text-secondary">Recipient Wallet</p>
-            <p className="font-mono text-xs text-cream">{newParentUser?.wallet ? shortAddr(newParentUser.wallet) : "—"}</p>
-            <p className="mt-2 text-secondary">Plan</p>
+            <p className="mt-2 text-secondary">LEFT / RIGHT</p>
+            <p className="text-cream">{selectedNode.position ?? "ROOT"}</p>
+            <p className="mt-2 text-secondary">Recipient wallet</p>
+            <p className="font-mono text-xs text-cream">{selectedNode.recipient_wallet ? shortAddr(selectedNode.recipient_wallet) : newParentUser?.wallet ? shortAddr(newParentUser.wallet) : "—"}</p>
+            <p className="mt-2 text-secondary">Plan / amount</p>
             <p className="text-cream">{planLabel(planId) ?? "—"}</p>
-            <p className="mt-2 text-secondary">Amount</p>
-            <p className="text-cream">{planLabel(planId) ?? "—"}</p>
-            <p className="mt-2 text-secondary">Payment Status</p>
-            <p className="text-warning">PAYMENT REQUIRED / RESERVED</p>
+            <p className="mt-2 text-secondary">Payment status</p>
+            <p className="text-warning">{selectedNode.reentry_tx_hash ? "Reserved — tx on file" : "PAYMENT REQUIRED / RESERVED"}</p>
           </section>
         )}
         <section>
@@ -542,8 +612,11 @@ export function GlobalNetworkTree({
           )}
         </section>
         <section>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Position history</p>
-          <div className="mt-3">{historyBlock()}</div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Global Position Journey</p>
+          <p className="mt-1 text-[11px] text-mute">
+            {planLabel(planId) ?? "This plan"} · previous {counts.previous} · re-entries {counts.reentries}
+          </p>
+          <div className="mt-3">{journeyBlock()}</div>
         </section>
       </div>
     </aside>
@@ -571,7 +644,29 @@ export function GlobalNetworkTree({
           </p>
         </div>
       </div>
-      {searchNote && <p className="mt-2 text-sm text-secondary">{searchNote}</p>}
+      {searchNote && (
+        <div className="mt-2 rounded-xl border border-line bg-[#0B1220] p-3 text-sm">
+          <p className="text-secondary">{searchNote}</p>
+          {searchStats && selectedNode && (
+            <div className="mt-2 grid gap-1 text-xs text-cream">
+              <p>Current parent: {searchStats.parent ?? "—"}</p>
+              <p>Current leg: {searchStats.position ?? "ROOT"}</p>
+              <p>Current status: {searchStats.status}</p>
+              <p className="text-mute">Previous positions: {searchStats.previous} · Re-entries: {searchStats.reentries}</p>
+              <button
+                type="button"
+                className="mt-1 text-left text-xs text-electric"
+                onClick={() => {
+                  setHistoryOpen(true);
+                  requestAnimationFrame(() => document.getElementById("gx-journey")?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+                }}
+              >
+                View Position Journey
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 space-y-3 lg:hidden">
         {selectedNode ? (
@@ -609,9 +704,9 @@ export function GlobalNetworkTree({
               className="w-full rounded-xl border border-line px-3 py-3 text-left text-sm text-cream"
               onClick={() => setHistoryOpen((v) => !v)}
             >
-              Position history {historyOpen ? "▾" : "▸"}
+              Position journey {historyOpen ? "▾" : "▸"}
             </button>
-            {historyOpen && <div className="rounded-xl border border-line bg-[#0B1220] p-4">{historyBlock()}</div>}
+            {historyOpen && <div className="rounded-xl border border-line bg-[#0B1220] p-4">{journeyBlock()}</div>}
           </>
         ) : (
           <p className="text-sm text-secondary">Search a wallet or referral code to inspect a Global seat. The full tree is on desktop.</p>
@@ -680,8 +775,8 @@ export function GlobalNetworkTree({
                     <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} />
                   </div>
                   <TransformComponent wrapperClass="!w-full !h-[560px] lg:!h-[640px]" contentClass="p-8">
-                    <div className="relative" style={{ width: canvasW, height: canvasH }}>
-                      <svg className="absolute inset-0" width={canvasW} height={canvasH}>
+                    <div className="relative" style={{ width: drawW, height: canvasH }}>
+                      <svg className="absolute inset-0" width={drawW} height={canvasH}>
                         {placed.map((p) => {
                           if (p.vis.kind !== "member" || !p.vis.node) return null;
                           const kids = placed.filter((c) => {
@@ -714,6 +809,17 @@ export function GlobalNetworkTree({
                             );
                           });
                         })}
+                        {selectedPlaced && previousHistory && (
+                          <g>
+                            <path
+                              d={`M ${selectedPlaced.x + NODE_W / 2 + 8} ${selectedPlaced.y + NODE_H / 2} L ${selectedPlaced.x + NODE_W + 28} ${selectedPlaced.y + NODE_H / 2}`}
+                              fill="none"
+                              stroke="rgba(154,168,199,0.55)"
+                              strokeWidth="2"
+                              strokeDasharray="5 5"
+                            />
+                          </g>
+                        )}
                       </svg>
                       {placed.map((p) => (
                         <MemberCard
@@ -725,6 +831,20 @@ export function GlobalNetworkTree({
                           planId={planId}
                         />
                       ))}
+                      {selectedPlaced && previousHistory && (
+                        <div
+                          className="pointer-events-none absolute rounded-[14px] border border-dashed border-mute/50 bg-[#0B1220]/80 px-2 py-2"
+                          style={{
+                            left: selectedPlaced.x + NODE_W / 2 + 28,
+                            top: selectedPlaced.y + 12,
+                            width: NODE_W,
+                          }}
+                        >
+                          <p className="text-[9px] font-semibold uppercase tracking-wide text-mute">Previous position</p>
+                          <p className="mt-1 text-[11px] text-cream">{previousHistory.parent_code ?? (previousHistory.parent_id ? "—" : "Root")}</p>
+                          <p className="text-[10px] text-mute">{previousHistory.position ?? "ROOT"} · HISTORY</p>
+                        </div>
+                      )}
                     </div>
                   </TransformComponent>
                 </TransformWrapper>
@@ -745,7 +865,10 @@ export function GlobalNetworkTree({
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-4 border border-dashed border-warning" /> RESERVED
                 </span>
-                <span className="inline-flex items-center gap-1.5">HISTORY lives in the detail timeline</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> Previous (selected only)
+                </span>
+                <span className="inline-flex items-center gap-1.5">HISTORY lives in Position Journey</span>
               </div>
             )}
           </div>
