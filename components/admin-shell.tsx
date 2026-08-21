@@ -28,7 +28,7 @@ const NAV: { href: string; label: string; icon: ComponentType<{ className?: stri
   { href: "/admin/transactions", label: "Transactions", icon: Receipt, group: "Payments" },
   { href: "/admin/plans", label: "Plans", icon: Receipt, group: "Payments" },
   { href: "/admin/referrals", label: "Referrals", icon: Share2, group: "Network" },
-  { href: "/admin/cycle", label: "Cycle", icon: GitBranch, group: "Network" },
+  { href: "/admin/cycle", label: "Cycle / Global Tree", icon: GitBranch, group: "Network" },
   { href: "/admin/settings", label: "Settings", icon: Settings, group: "System" },
 ];
 

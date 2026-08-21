@@ -8,7 +8,8 @@ import {
   usdtContract,
 } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
-import { PlanRoutingError, resolvePlanRecipient } from "@/payments/plan-routing";
+import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment } from "@/payments/plan-routing";
+import { activateReservedReentry } from "@/services/users";
 import { ChainVerifyError, verifyTokenTransfer } from "@/payments/verify";
 import { publicClient } from "@/lib/viem";
 import type { RegistrationRow, TransactionRow } from "@/types";
@@ -70,8 +71,37 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
       symbol: "USDT",
       recipientRole: "COMPANY_GENESIS" as const,
       slot: null as 1 | 2 | null,
+      directNumber: null as 1 | 2 | null,
+      globalParentUserId: null as string | null,
+      positionId: null as string | null,
       notice:
         "TESTNET. $5 registration always goes to the company address. Connect Wallet never creates this transfer.",
+    };
+  }
+
+  if (paymentType === "GLOBAL_REENTRY" || paymentType === "REENTRY") {
+    const registration = await getRegistration(userId);
+    if (registration?.status !== "ACTIVE") {
+      throw new Error("Complete $5 registration first. Plans unlock only after registration is ACTIVE.");
+    }
+    const routed = await resolveReentryPayment(userId);
+    return {
+      paymentType: "GLOBAL_REENTRY" as const,
+      planId: routed.planId,
+      planCode: routed.planCode,
+      chainId: activeChainId(),
+      tokenContract: token,
+      recipient: routed.recipient,
+      amountUsd: routed.amountUsd,
+      amountUnits: amountToUnits(routed.amountUsd).toString(),
+      decimals: 6,
+      symbol: "USDT",
+      recipientRole: routed.recipientRole,
+      slot: routed.slot,
+      directNumber: routed.directNumber,
+      globalParentUserId: routed.globalParentUserId,
+      positionId: routed.positionId ?? null,
+      notice: routed.notice,
     };
   }
 
@@ -102,6 +132,9 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
     symbol: "USDT",
     recipientRole: routed.recipientRole,
     slot: routed.slot,
+    directNumber: routed.directNumber,
+    globalParentUserId: routed.globalParentUserId,
+    positionId: routed.positionId ?? null,
     notice: routed.notice,
   };
 }
@@ -117,16 +150,14 @@ export async function confirmPayment(input: {
   paymentType: string;
   txHash: Hash;
 }) {
-  const prepared = await preparePayment(input.userId, input.paymentType, { forConfirm: true });
-  const already = await getRegistration(input.userId);
-  if (prepared.paymentType === "REGISTRATION" && already?.status === "ACTIVE") {
-    const existingTx = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
-    return { transaction: existingTx, registration: already };
-  }
-  const existing = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
-  if (existing?.status === "CONFIRMED") {
+  const existingEarly = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
+  if (existingEarly?.status === "CONFIRMED") {
+    if (existingEarly.user_id !== input.userId) throw new Error("TX_ALREADY_USED");
+    if (existingEarly.payment_type === "GLOBAL_REENTRY") {
+      await activateReservedReentry(input.userId, input.txHash);
+    }
     let registration = await getRegistration(input.userId);
-    if (prepared.paymentType === "REGISTRATION" && registration && registration.status !== "ACTIVE") {
+    if (existingEarly.payment_type === "REGISTRATION" && registration && registration.status !== "ACTIVE") {
       registration = await withStore((store) => {
         const reg = store.registrations.find((r) => r.user_id === input.userId)!;
         reg.status = "ACTIVE";
@@ -135,8 +166,16 @@ export async function confirmPayment(input: {
         return reg;
       });
     }
-    return { transaction: existing, registration };
+    return { transaction: existingEarly, registration };
   }
+
+  const prepared = await preparePayment(input.userId, input.paymentType, { forConfirm: true });
+  const already = await getRegistration(input.userId);
+  if (prepared.paymentType === "REGISTRATION" && already?.status === "ACTIVE") {
+    const existingTx = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
+    return { transaction: existingTx, registration: already };
+  }
+  const existing = (await readStore()).transactions.find((t) => t.tx_hash === input.txHash);
   if (existing && existing.user_id !== input.userId) throw new Error("TX_ALREADY_USED");
 
   const draftId = existing?.id ?? newId("tx");
@@ -158,6 +197,9 @@ export async function confirmPayment(input: {
         status: "PENDING",
         recipient_role: prepared.recipientRole,
         routing_slot: prepared.slot,
+        direct_number: "directNumber" in prepared ? prepared.directNumber : null,
+        global_parent_user_id: "globalParentUserId" in prepared ? prepared.globalParentUserId : null,
+        position_id: "positionId" in prepared ? prepared.positionId : null,
         created_at: new Date().toISOString(),
       });
     });
@@ -213,6 +255,9 @@ export async function confirmPayment(input: {
         reg.activated_at = new Date().toISOString();
         return reg;
       });
+    }
+    if (prepared.paymentType === "GLOBAL_REENTRY") {
+      await activateReservedReentry(input.userId, input.txHash);
     }
     return { transaction, registration };
   } catch (error) {

@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
 import { isAddress, verifyMessage } from "viem";
-import { assignSponsor, createUser, findSponsorByCode } from "@/services/users";
+import { assignSponsor, assertCanAcceptDirect, createUser, findSponsorByCode } from "@/services/users";
 import { newId, readStore, withStore } from "@/lib/store";
 import { activeChainId, appUrl } from "@/lib/network-config";
 import { isCompleteProfile, normalizeMemberProfile } from "@/lib/member-profile";
@@ -87,7 +87,8 @@ export async function verifyLogin(input: {
   }
 
   if (input.referralCode) {
-    findSponsorByCode(snapshot.users, input.referralCode, "new");
+    const sponsor = findSponsorByCode(snapshot.users, input.referralCode, "new");
+    assertCanAcceptDirect(snapshot, sponsor.id);
   }
 
   const user = await createUser({

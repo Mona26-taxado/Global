@@ -139,10 +139,10 @@ export const DEFAULT_PLANS = [
 ];
 
 export const DEFAULT_GLOBAL_CONFIG = {
-  qualification_rule: "User is verified and has at least one direct referral.",
-  global_entry_condition: "Enter Global after qualification. Prototype only — not a guarantee of income.",
-  two_branch_cycle: "Each position fills LEFT then RIGHT.",
-  placement_rule: "BFS from root: first vacant LEFT, then RIGHT.",
-  cycle_completion: "A cycle completes when both LEFT and RIGHT are filled.",
-  position_movement: "Next open BFS slot. Positions are never shuffled on refresh.",
+  qualification_rule: "Direct #2 of a member with this plan ACTIVE places that member in Global.",
+  global_entry_condition: "Enter Global on Direct #2. Direct #1 pays the sponsor; Direct #2 pays the new Global parent.",
+  two_branch_cycle: "Each Global position has LEFT and RIGHT. Level order fills LEFT then RIGHT.",
+  placement_rule: "Deterministic BFS from the live/reserved tree: next empty LEFT, then RIGHT, then the next level. Re-entry uses the same allocator.",
+  cycle_completion: "A Global seat completes when both LEFT and RIGHT are filled.",
+  position_movement: "When both Global legs complete, the member’s current seat is history and a new active seat is opened. Old rows are never deleted.",
 };

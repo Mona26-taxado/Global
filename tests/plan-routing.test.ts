@@ -10,7 +10,13 @@ describe("plan direct slots", () => {
     expect(planDirectSlot(1)).toBe(2);
   });
   it("rejects a third direct", () => {
-    expect(() => planDirectSlot(2)).toThrow(PlanRoutingError);
+    try {
+      planDirectSlot(2);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(PlanRoutingError);
+      expect((error as PlanRoutingError).code).toBe("DIRECT_REFERRAL_LIMIT_REACHED");
+    }
   });
 });
 

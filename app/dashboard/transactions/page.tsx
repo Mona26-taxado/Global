@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, PageHeader, StatusBadge } from "@/components/ui/app-ui";
 import { ResponsiveDataList } from "@/components/ui/data-list";
 import { api, shortAddr } from "@/lib/utils";
+import { routingLabel } from "@/lib/cycle-ui";
 
 type Tx = {
   tx_hash: string;
@@ -18,6 +19,8 @@ type Tx = {
   token: string;
   created_at: string;
   amount: string;
+  recipient_role?: string | null;
+  routing_slot?: number | null;
 };
 
 export default function TxPage() {
@@ -68,7 +71,7 @@ export default function TxPage() {
                   <tbody>
                     {rows.map((t) => (
                       <tr key={t.tx_hash} className="h-14 border-t border-line">
-                        <td className="px-4">{t.payment_type ?? t.plan_code}</td>
+                        <td className="px-4">{routingLabel(t.recipient_role, t.routing_slot)}</td>
                         <td className="tabular">{t.amount}</td>
                         <td>{t.token}</td>
                         <td>
@@ -94,7 +97,7 @@ export default function TxPage() {
             cards={rows.map((t) => (
               <Card key={t.tx_hash} className="p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm font-semibold">{t.payment_type ?? t.plan_code}</p>
+                  <p className="text-sm font-semibold">{routingLabel(t.recipient_role, t.routing_slot)}</p>
                   <StatusBadge status={t.status} />
                 </div>
                 <p className="mt-2 font-display text-xl tabular">

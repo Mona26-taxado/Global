@@ -23,9 +23,20 @@ export type Me = {
   directs: number;
   active_referrals?: number;
   total_referrals?: number;
-  referrals?: { id: string; wallet: string | null; registration_status: string; joined: string }[];
+  referrals?: { id: string; wallet: string | null; registration_status: string; joined: string; direct_number?: 1 | 2 | null }[];
   registration?: { status: string; tx_hash?: string | null };
   transactions?: unknown[];
+  reentry?: {
+    required: boolean;
+    reserved: boolean;
+    position_id: string | null;
+    position?: "LEFT" | "RIGHT" | null;
+    global_parent_user_id: string | null;
+    global_parent_code?: string | null;
+    recipient_wallet: string | null;
+    amount_usd: number | null;
+    plan_code: string | null;
+  };
   is_demo: boolean;
 };
 

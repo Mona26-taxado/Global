@@ -109,8 +109,22 @@ alter table plans add column if not exists description text;
 alter table plans add column if not exists active boolean default true;
 alter table plans add column if not exists created_at timestamptz default now();
 alter table plans add column if not exists updated_at timestamptz default now();
-alter table transactions add column if not exists payment_type text;
-alter table transactions add column if not exists plan_id text;
+alter table network_positions add column if not exists status text default 'ACTIVE';
+alter table network_positions add column if not exists started_at timestamptz default now();
+alter table network_positions add column if not exists ended_at timestamptz;
+alter table referrals add column if not exists direct_number int;
+alter table referrals add column if not exists status text default 'ACTIVE';
+alter table transactions add column if not exists recipient_role text;
+alter table transactions add column if not exists routing_slot int;
+alter table transactions add column if not exists direct_number int;
+alter table network_positions add column if not exists from_position_id text;
+alter table network_positions add column if not exists recipient_user_id text;
+alter table network_positions add column if not exists recipient_wallet text;
+alter table network_positions add column if not exists reentry_tx_hash text;
+alter table transactions add column if not exists position_id text;
+
+-- Multiple Global seats per user (current ACTIVE + HISTORY). App state JSON is the live store.
+-- Do not enforce unique(user_id) on network_positions.
 
 -- Browser anon key must not read these tables. Next.js uses SERVICE_ROLE (bypasses RLS).
 alter table users enable row level security;

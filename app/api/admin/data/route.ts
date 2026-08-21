@@ -109,7 +109,31 @@ export async function GET(req: NextRequest) {
       plans: s.transactions.filter((t) => t.user_id === id && t.payment_type === "PLAN_PURCHASE"),
       transactions: s.transactions.filter((t) => t.user_id === id),
       referrer: s.users.find((x) => x.id === u.sponsor_id),
-      referrals: s.users.filter((x) => x.sponsor_id === id),
+      referrals: s.referrals
+        .filter((r) => r.sponsor_id === id)
+        .map((r) => {
+          const person = s.users.find((x) => x.id === r.user_id);
+          return { ...r, referral_code: person?.referral_code, display_name: person?.display_name };
+        }),
+      positions: s.network_positions
+        .filter((p) => p.user_id === id)
+        .map((p) => {
+          const parentPos = p.parent_id ? s.network_positions.find((x) => x.id === p.parent_id) : null;
+          const parentUser = parentPos ? s.users.find((x) => x.id === parentPos.user_id) : null;
+          return { ...p, parent_code: parentUser?.referral_code ?? null };
+        }),
+      current_position: s.network_positions.find((p) => p.user_id === id && (p.status ?? "ACTIVE") === "ACTIVE") ?? null,
+      current_global_parent_id: (() => {
+        const cur = s.network_positions.find((p) => p.user_id === id && (p.status ?? "ACTIVE") === "ACTIVE");
+        if (!cur?.parent_id) return null;
+        return s.network_positions.find((p) => p.id === cur.parent_id)?.user_id ?? null;
+      })(),
+      current_global_parent_code: (() => {
+        const cur = s.network_positions.find((p) => p.user_id === id && (p.status ?? "ACTIVE") === "ACTIVE");
+        if (!cur?.parent_id) return null;
+        const parentPos = s.network_positions.find((p) => p.id === cur.parent_id);
+        return parentPos ? s.users.find((x) => x.id === parentPos.user_id)?.referral_code ?? null : null;
+      })(),
     });
   }
   return jsonOk({ rows: [] });

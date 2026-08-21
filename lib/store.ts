@@ -36,10 +36,12 @@ export type Store = {
   global_config: GlobalConfig;
 };
 
-const DATA_PATH =
-  process.env.VERCEL || process.env.NOW_REGION
+function dataPath() {
+  if (process.env.GLOBALX_DATA_PATH) return process.env.GLOBALX_DATA_PATH;
+  return process.env.VERCEL || process.env.NOW_REGION
     ? join("/tmp", "globalx.json")
     : join(process.cwd(), "data", "globalx.json");
+}
 
 const STATE_ID = "globalx";
 
@@ -96,17 +98,39 @@ function migrate(store: Store): Store {
     payment_type: t.payment_type ?? (t.plan_code === "REGISTRATION" ? "REGISTRATION" : "PLAN_PURCHASE"),
     plan_id: t.plan_id ?? (t.plan_code && t.plan_code !== "REGISTRATION" ? t.plan_code : null),
   }));
+  store.network_positions = (store.network_positions ?? []).map((p) => ({
+    ...p,
+    status: p.status ?? "ACTIVE",
+    started_at: p.started_at ?? nowIso(),
+    ended_at: p.ended_at ?? null,
+  }));
+  const refs = store.referrals ?? [];
+  const seen = new Map<string, number>();
+  store.referrals = refs.map((r) => {
+    if (r.direct_number === 1 || r.direct_number === 2) {
+      return { ...r, status: r.status ?? "ACTIVE" };
+    }
+    const n = (seen.get(r.sponsor_id) ?? 0) + 1;
+    seen.set(r.sponsor_id, n);
+    return {
+      ...r,
+      direct_number: n === 1 || n === 2 ? (n as 1 | 2) : undefined,
+      status: r.status ?? "ACTIVE",
+    };
+  });
   return store;
 }
 
 function readFileStore(): Store {
-  if (!existsSync(DATA_PATH)) return emptyStore();
-  return migrate(JSON.parse(readFileSync(DATA_PATH, "utf8")) as Store);
+  const path = dataPath();
+  if (!existsSync(path)) return emptyStore();
+  return migrate(JSON.parse(readFileSync(path, "utf8")) as Store);
 }
 
 function writeFileStore(store: Store) {
-  mkdirSync(join(DATA_PATH, ".."), { recursive: true });
-  writeFileSync(DATA_PATH, JSON.stringify(store, null, 2));
+  const path = dataPath();
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, JSON.stringify(store, null, 2));
 }
 
 export function supabaseEnabled() {

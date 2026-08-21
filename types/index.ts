@@ -50,6 +50,8 @@ export type ReferralRow = {
   user_id: string;
   sponsor_id: string;
   referral_code: string;
+  direct_number?: 1 | 2;
+  status?: "ACTIVE" | "REJECTED";
 };
 
 export type PlanRow = {
@@ -86,13 +88,16 @@ export type TransactionRow = {
   token_contract: string;
   chain_id: number;
   tx_hash: string;
-  payment_type: "REGISTRATION" | "PLAN_PURCHASE";
+  payment_type: "REGISTRATION" | "PLAN_PURCHASE" | "GLOBAL_REENTRY";
   plan_id: string | null;
   plan_code: string;
   status: "PENDING" | "CONFIRMED" | "FAILED" | "REJECTED";
   failure_reason?: string | null;
-  recipient_role?: "SPONSOR" | "GLOBAL_UPLINE" | "COMPANY_GENESIS" | null;
+  recipient_role?: "SPONSOR" | "GLOBAL_UPLINE" | "COMPANY_GENESIS" | "GLOBAL_REENTRY" | null;
   routing_slot?: 1 | 2 | null;
+  direct_number?: 1 | 2 | null;
+  global_parent_user_id?: string | null;
+  position_id?: string | null;
   created_at: string;
 };
 
@@ -103,6 +108,13 @@ export type NetworkPositionRow = {
   position: "LEFT" | "RIGHT" | null;
   depth: number;
   cycle: number;
+  status?: "ACTIVE" | "HISTORY" | "RESERVED";
+  started_at?: string;
+  ended_at?: string | null;
+  from_position_id?: string | null;
+  recipient_user_id?: string | null;
+  recipient_wallet?: string | null;
+  reentry_tx_hash?: string | null;
 };
 
 export type GlobalConfig = {

@@ -101,9 +101,12 @@ function upsertMember(
     });
   }
   if (input.role === "global") {
-    const existing = store.network_positions.find((p) => p.user_id === user!.id);
+    const existing = store.network_positions.find(
+      (p) => p.user_id === user!.id && (p.status ?? "ACTIVE") === "ACTIVE",
+    );
     if (!existing) {
       const livePositions = store.network_positions.filter((p) => {
+        if ((p.status ?? "ACTIVE") !== "ACTIVE") return false;
         const owner = store.users.find((u) => u.id === p.user_id);
         return owner && !owner.is_demo;
       });
@@ -115,6 +118,9 @@ function upsertMember(
         position: placement.position,
         depth: placement.depth,
         cycle: Math.floor(placement.depth / 2),
+        status: "ACTIVE" as const,
+        started_at: new Date().toISOString(),
+        ended_at: null,
       });
     }
   }

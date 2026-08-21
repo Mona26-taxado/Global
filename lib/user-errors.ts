@@ -80,8 +80,8 @@ export function friendlyMessage(raw?: string | null): { title: string; detail: s
   if (/complete \$5|complete registration/.test(lower)) {
     return { title: "Registration required", detail: "Pay the $5 registration fee before buying a plan.", tone: "warning" };
   }
-  if (/plan_directs_full|third payment/.test(lower)) {
-    return { title: "This plan is full for your sponsor", detail: "A sponsor can only have two directs on the same plan.", tone: "warning" };
+  if (/reentry_not_required|not completed both/.test(lower)) {
+    return { title: "Re-entry is not due", detail: "Re-entry pay is only required after both Global legs of your current seat are filled.", tone: "info" };
   }
 
   if (/^[A-Z0-9_]{6,}$/.test(text) || text.length > 180 || text.includes("{") || text.includes("Signer Error")) {

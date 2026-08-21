@@ -52,7 +52,7 @@ export default function ReferralPage() {
         {rows.map((r, i) => (
           <Card key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div className="min-w-0">
-              <p className="text-sm font-semibold">Direct {i + 1}</p>
+              <p className="text-sm font-semibold">Direct {r.direct_number ?? i + 1}</p>
               <p className="mt-1 font-mono text-xs text-secondary">{shortAddr(r.wallet)}</p>
               <p className="mt-1 text-[11px] text-mute">{new Date(r.joined).toLocaleDateString()}</p>
             </div>

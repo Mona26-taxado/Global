@@ -54,10 +54,12 @@ export function StatusBadge({ status }: { status: string }) {
       ? "mute"
       : /NOT CONFIGURED|FAIL|ERROR|REJECT/.test(s)
         ? "danger"
-        : /ACTIVE|CONFIRMED|CONNECTED|VERIFIED|SUCCESS|CURRENT|CONFIGURED/.test(s)
-          ? "mint"
-          : /PENDING|WAITING|UNVERIFIED/.test(s)
-            ? "warning"
+        : /RESERVED|PAYMENT REQUIRED|QUALIFIED|CONFIRMING/.test(s)
+          ? "warning"
+          : /ACTIVE|CONFIRMED|CONNECTED|VERIFIED|SUCCESS|CURRENT|CONFIGURED/.test(s)
+            ? "mint"
+            : /PENDING|WAITING|UNVERIFIED/.test(s)
+              ? "warning"
             : /TESTNET/.test(s)
               ? "warning"
               : "mute";
