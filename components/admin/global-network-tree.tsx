@@ -17,7 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, journeyCounts, liveApiSeats, liveForestRoots, matchesWalletOrCode, parentOf, previousHistoryChain, routingLabel, searchTreePositions, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -56,6 +56,23 @@ export type CycleRef = {
   referral_code: string;
   sponsor_code?: string;
   direct_number?: 1 | 2;
+};
+
+type SearchHit = {
+  key: string;
+  positionId: string | null;
+  userId: string;
+  planId?: string;
+  planName: string;
+  member: string;
+  wallet: string;
+  status: string;
+  parentLabel: string;
+  position: string | null;
+  previous: number;
+  reentries: number;
+  paymentRequired: boolean;
+  live: boolean;
 };
 
 type VisKind = "member" | "empty";
@@ -127,6 +144,19 @@ function place(v: VisNode, originX: number, depth: number, out: Placed[]) {
   if (v.right) place(v.right, originX + lw + (v.left ? H_GAP : 0), depth + 1, out);
 }
 
+function TreeFocus({ nodeId, nonce }: { nodeId: string | null; nonce: number }) {
+  const { zoomToElement } = useControls();
+  useEffect(() => {
+    if (!nodeId) return;
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(`gx-node-${nodeId}`);
+      if (el) zoomToElement(el, 1.2, 380);
+    }, 40);
+    return () => window.clearTimeout(t);
+  }, [nodeId, nonce, zoomToElement]);
+  return null;
+}
+
 function Toolbar({ legendOpen, onLegend }: { legendOpen: boolean; onLegend: () => void }) {
   const { zoomIn, zoomOut, resetTransform } = useControls();
   const [pct, setPct] = useState(100);
@@ -175,7 +205,6 @@ function MemberCard({
   planId,
   onSelect,
   showAsRoot,
-  phase,
 }: {
   placed: Placed;
   selected: boolean;
@@ -183,7 +212,6 @@ function MemberCard({
   planId?: string;
   onSelect: () => void;
   showAsRoot?: boolean;
-  phase?: "now" | "next";
 }) {
   if (placed.vis.kind === "empty") {
     return (
@@ -193,17 +221,16 @@ function MemberCard({
       >
         <span className="h-2 w-2 rounded-full bg-mute/50" />
         <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-mute">Empty</p>
-        <p className="text-[10px] font-semibold text-mute/80">{placed.vis.position}</p>
+        <p className="text-[10px] font-semibold uppercase text-mute/80">{placed.vis.position}</p>
       </div>
     );
   }
   const node = placed.vis.node!;
   const reserved = statusOf(node) === "RESERVED";
-  const history = statusOf(node) === "HISTORY";
   const isRoot = (!node.parent_id && !reserved) || Boolean(showAsRoot && reserved);
   const code = node.user?.referral_code ?? shortAddr(node.user_id);
   const tail = walletTail(user?.wallet);
-  const label = isRoot || (history && !node.parent_id) ? "ROOT" : reserved ? code : history ? code : tail ?? code;
+  const label = isRoot ? "ROOT" : reserved ? code : tail ?? code;
   const st = statusOf(node);
   const plan = planLabel(planId) ?? planLabel(user?.current_plan);
   return (
@@ -213,30 +240,20 @@ function MemberCard({
       onClick={onSelect}
       className={`absolute rounded-[16px] border px-2.5 py-2 text-left transition ${
         selected
-          ? "border-violet bg-[#0D1424] shadow-[0_0_0_1px_rgba(124,92,255,0.45),0_0_28px_rgba(124,92,255,0.28)]"
+          ? "z-10 border-violet bg-[#0d1322] shadow-[0_0_0_2px_rgba(124,92,255,0.85),0_0_28px_rgba(59,130,246,0.45),0_0_48px_rgba(124,92,255,0.35)]"
           : reserved
-            ? "border-dashed border-warning bg-[#0B1220]/70 hover:border-warning"
-            : history
-              ? "border-dashed border-mute/50 bg-[#0B1220]/80"
-              : "border-line bg-[#0B1220] hover:-translate-y-0.5 hover:border-violet/35 hover:shadow-card"
+            ? "border-dashed border-warning bg-[#0d1322]/80 hover:border-warning"
+            : "border-line bg-[#0d1322] hover:-translate-y-0.5 hover:border-violet/35 hover:shadow-card"
       }`}
       style={{ left: placed.x - NODE_W / 2, top: placed.y, width: NODE_W, height: NODE_H }}
     >
       <div className="flex items-start gap-2">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${reserved ? "bg-warning/70" : history ? "bg-mute/50" : "bg-gradient-to-br from-violet/80 to-electric/70"}`}>
-          {initials(label)}
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${reserved ? "bg-warning/80" : "bg-gradient-to-br from-violet/80 to-electric/70"}`}>
+          {initials(label === "ROOT" ? code : label)}
         </span>
         <div className="min-w-0">
           <p className="truncate font-mono text-[12px] font-semibold tracking-wide text-cream">{label}</p>
-          {history && <p className="text-[9px] font-semibold uppercase tracking-wide text-mute">Was</p>}
-          {phase === "now" && !reserved && !history && <p className="text-[9px] font-semibold uppercase tracking-wide text-mint">Now</p>}
-          {phase === "next" && <p className="text-[9px] font-semibold uppercase tracking-wide text-warning">Next</p>}
-          {reserved && (
-            <>
-              <p className="truncate text-[10px] text-secondary">{code}</p>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-warning">Reserved</p>
-            </>
-          )}
+          {reserved && <p className="text-[10px] font-semibold uppercase tracking-wide text-warning">Reserved</p>}
         </div>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-1">
@@ -267,6 +284,8 @@ export function GlobalNetworkTree({
   error,
   onRetry,
   planId,
+  plans = [],
+  onPlanId,
 }: {
   tree: NetNode[];
   users: CycleUser[];
@@ -277,51 +296,47 @@ export function GlobalNetworkTree({
   error: boolean;
   onRetry: () => void;
   planId?: string;
+  plans?: { id: string; code: string; name: string; amount_usd: number }[];
+  onPlanId?: (planId: string) => void;
 }) {
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [searchAllPlans, setSearchAllPlans] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [levels, setLevels] = useState<3 | 5 | "all">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [legend, setLegend] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyByUser, setHistoryByUser] = useState<Map<string, JourneyPosition[]>>(new Map());
-  const [searchNote, setSearchNote] = useState("");
-  const [searchStats, setSearchStats] = useState<{
-    previous: number;
-    reentries: number;
-    parent?: string;
-    position?: string | null;
-    status?: string;
-  } | null>(null);
+  const [matchedUserIds, setMatchedUserIds] = useState<string[]>([]);
+  const [focusNonce, setFocusNonce] = useState(0);
+  const [pendingFocus, setPendingFocus] = useState<{ positionId: string | null; userId: string } | null>(null);
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
-  const userByWallet = useMemo(() => {
-    const m = new Map<string, CycleUser>();
+  const enrichedUsers = useMemo(() => {
+    const walletOf = new Map<string, string>();
     for (const w of wallets) {
-      if (!w.user || !w.address) continue;
-      const u = userById.get(w.user);
-      if (u) m.set(w.address.toLowerCase(), u);
+      if (w.user && w.address) walletOf.set(w.user, w.address);
     }
-    for (const u of users) {
-      if (u.wallet) m.set(u.wallet.toLowerCase(), u);
-    }
-    return m;
-  }, [wallets, users, userById]);
+    return users.map((u) => ({
+      ...u,
+      wallet: u.wallet || walletOf.get(u.id) || undefined,
+    }));
+  }, [users, wallets]);
 
   const liveTree = useMemo(() => liveApiSeats(tree), [tree]);
-  const allHistoryRows = useMemo(() => [...historyByUser.values()].flat(), [historyByUser]);
-  const displayTree = useMemo(() => displayForestSeats(liveTree, allHistoryRows), [liveTree, allHistoryRows]);
   const activeRootUserIds = useMemo(
     () => new Set(liveTree.filter((n) => !n.parent_id && (n.status ?? "ACTIVE") === "ACTIVE").map((n) => n.user_id)),
     [liveTree],
   );
   const maxDepth = levels === "all" ? Infinity : levels;
-  const roots = useMemo(() => liveForestRoots(displayTree), [displayTree]);
+  const roots = useMemo(() => liveForestRoots(liveTree), [liveTree]);
 
   const visRoots = useMemo(() => {
-    const byParent = childSlotsByParent(displayTree);
+    const byParent = childSlotsByParent(liveTree);
     const visited = new Set<string>();
     return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
-  }, [displayTree, roots, maxDepth]);
+  }, [liveTree, roots, maxDepth]);
 
   const placed = useMemo(() => {
     const out: Placed[] = [];
@@ -337,95 +352,274 @@ export function GlobalNetworkTree({
   const canvasW = useMemo(() => Math.max(640, ...placed.map((p) => p.x + NODE_W), 24), [placed]);
   const canvasH = useMemo(() => Math.max(420, ...placed.map((p) => p.y + NODE_H + 40), 120), [placed]);
 
-  const selectedNode = displayTree.find((n) => n.id === selectedId) ?? null;
+  const selectedNode = liveTree.find((n) => n.id === selectedId) ?? null;
   const selectedUser = selectedNode ? userById.get(selectedNode.user_id) : undefined;
-  const globalParent = parentOf(displayTree, selectedNode ?? undefined);
-  const historyRows = selectedNode ? (historyByUser.get(selectedNode.user_id) ?? []) : [];
-  const movedUserKey = useMemo(
-    () =>
-      [...new Set(liveTree.filter((n) => n.from_position_id).map((n) => n.user_id))].sort().join(","),
-    [liveTree],
-  );
+  const globalParent = parentOf(liveTree, selectedNode ?? undefined);
+  const historyRows = selectedNode
+    ? (historyByUser.get(selectedNode.user_id) ?? []).filter((p) => !planId || !p.plan_id || p.plan_id === planId)
+    : [];
+  const positionFetchKey = useMemo(() => {
+    const ids = new Set<string>();
+    for (const n of liveTree) {
+      if (n.from_position_id) ids.add(n.user_id);
+    }
+    for (const id of matchedUserIds) ids.add(id);
+    return [...ids].sort().join(",");
+  }, [liveTree, matchedUserIds]);
 
   useEffect(() => {
-    if (!movedUserKey) {
+    if (!positionFetchKey) {
       setHistoryByUser(new Map());
       return;
     }
-    const ids = movedUserKey.split(",");
+    const ids = positionFetchKey.split(",");
     let cancelled = false;
     void Promise.all(
       ids.map((id) =>
-        api<{ ok: boolean; positions?: JourneyPosition[] }>(`/api/admin/data?resource=user&id=${encodeURIComponent(id)}`).then(
-          (r) => [id, r.ok ? (r.positions ?? []) : []] as const,
-        ),
+        api<{ ok: boolean; positions?: JourneyPosition[] }>(`/api/admin/data?resource=user&id=${encodeURIComponent(id)}`)
+          .then((r) => [id, r.ok ? (r.positions ?? []) : []] as const)
+          .catch(() => [id, [] as JourneyPosition[]] as const),
       ),
     ).then((entries) => {
       if (cancelled) return;
       const next = new Map<string, JourneyPosition[]>();
-      for (const [id, rows] of entries) {
-        next.set(
-          id,
-          planId ? rows.filter((p) => !p.plan_id || p.plan_id === planId) : rows,
-        );
-      }
+      for (const [id, rows] of entries) next.set(id, rows);
       setHistoryByUser(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [movedUserKey, planId]);
+  }, [positionFetchKey]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQ(q), 300);
+    return () => window.clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    const needle = debouncedQ.trim();
+    if (!needle) {
+      setMatchedUserIds([]);
+      return;
+    }
+    const ids = enrichedUsers.filter((u) => matchesWalletOrCode(needle, u)).map((u) => u.id);
+    for (const n of searchTreePositions(needle, liveTree, enrichedUsers)) {
+      if (!ids.includes(n.user_id)) ids.push(n.user_id);
+    }
+    setMatchedUserIds(ids.slice(0, 12));
+  }, [debouncedQ, enrichedUsers, liveTree]);
+
+  const planNameOf = (id?: string | null) => plans.find((p) => p.id === id)?.name ?? planLabel(id) ?? id ?? "—";
+
+  const searchHits = useMemo(() => {
+    const needle = debouncedQ.trim();
+    if (!needle) return [] as SearchHit[];
+    const liveHits = searchTreePositions(needle, liveTree, enrichedUsers);
+    const userIds = new Set<string>(matchedUserIds);
+    for (const n of liveHits) userIds.add(n.user_id);
+
+    const countsFor = (userId: string, scopedPlan?: string) => {
+      const rows = (historyByUser.get(userId) ?? []).filter((r) => !scopedPlan || !r.plan_id || r.plan_id === scopedPlan);
+      return journeyCounts(
+        buildPositionJourney(
+          rows,
+          scopedPlan,
+          txs.map((t) => ({
+            tx_hash: t.tx_hash,
+            position_id: t.position_id,
+            recipient_wallet: t.recipient_wallet,
+            status: t.status,
+            payment_type: t.payment_type,
+            amount: t.amount,
+            plan_id: t.plan_id,
+            plan_code: t.plan_code,
+          })),
+        ),
+      );
+    };
+
+    const parentFromLive = (node: NetNode) => {
+      if (!node.parent_id) return "ROOT";
+      const p = parentOf(liveTree, node);
+      return p?.user?.referral_code ?? walletTail(userById.get(p?.user_id ?? "")?.wallet) ?? "—";
+    };
+
+    const toHit = (opts: {
+      key: string;
+      positionId: string | null;
+      userId: string;
+      planId?: string;
+      status: string;
+      parentLabel: string;
+      position: string | null;
+      live: boolean;
+    }): SearchHit => {
+      const u = userById.get(opts.userId);
+      const c = countsFor(opts.userId, searchAllPlans ? opts.planId : planId);
+      return {
+        ...opts,
+        planName: planNameOf(opts.planId ?? planId),
+        member: u?.referral_code ?? liveTree.find((n) => n.user_id === opts.userId)?.user?.referral_code ?? shortAddr(opts.userId),
+        wallet: u?.wallet ?? "—",
+        previous: c.previous,
+        reentries: c.reentries,
+        paymentRequired: opts.status === "RESERVED",
+      };
+    };
+
+    const out: SearchHit[] = [];
+    const seen = new Set<string>();
+
+    if (!searchAllPlans) {
+      for (const n of liveHits) {
+        seen.add(n.id);
+        out.push(
+          toHit({
+            key: n.id,
+            positionId: n.id,
+            userId: n.user_id,
+            planId,
+            status: statusOf(n),
+            parentLabel: parentFromLive(n),
+            position: n.position,
+            live: true,
+          }),
+        );
+      }
+      for (const uid of userIds) {
+        for (const row of historyByUser.get(uid) ?? []) {
+          if (row.plan_id && planId && row.plan_id !== planId) continue;
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          const live = liveTree.find((n) => n.id === row.id);
+          out.push(
+            toHit({
+              key: row.id,
+              positionId: row.id,
+              userId: uid,
+              planId: row.plan_id ?? planId,
+              status: row.status ?? "ACTIVE",
+              parentLabel: live ? parentFromLive(live) : row.parent_code ?? (row.parent_id ? "—" : "ROOT"),
+              position: live?.position ?? row.position ?? null,
+              live: Boolean(live),
+            }),
+          );
+        }
+      }
+    } else {
+      for (const uid of userIds) {
+        const rows = historyByUser.get(uid) ?? [];
+        const planList = plans.length ? plans : [{ id: planId ?? "", code: planId ?? "", name: planNameOf(planId), amount_usd: 0 }];
+        for (const plan of planList) {
+          const scoped = rows.filter((r) => !r.plan_id || r.plan_id === plan.id);
+          const liveForPlan = plan.id === planId ? liveTree.filter((n) => n.user_id === uid) : [];
+          const seats = new Map<string, { id: string; status?: string; parent_id?: string | null; parent_code?: string | null; position?: string | null }>();
+          for (const n of liveForPlan) seats.set(n.id, n);
+          for (const r of scoped) seats.set(r.id, r);
+          if (seats.size === 0) {
+            if (!historyByUser.has(uid)) continue;
+            out.push(
+              toHit({
+                key: `${uid}:${plan.id}:none`,
+                positionId: null,
+                userId: uid,
+                planId: plan.id,
+                status: "no position",
+                parentLabel: "—",
+                position: null,
+                live: false,
+              }),
+            );
+            continue;
+          }
+          for (const seat of seats.values()) {
+            if (seen.has(seat.id)) continue;
+            seen.add(seat.id);
+            const live = liveTree.find((n) => n.id === seat.id);
+            out.push(
+              toHit({
+                key: seat.id,
+                positionId: seat.id,
+                userId: uid,
+                planId: plan.id,
+                status: seat.status ?? live?.status ?? "ACTIVE",
+                parentLabel: live ? parentFromLive(live) : seat.parent_code ?? (seat.parent_id ? "—" : "ROOT"),
+                position: live?.position ?? seat.position ?? null,
+                live: Boolean(live),
+              }),
+            );
+          }
+        }
+      }
+      for (const n of liveHits) {
+        if (seen.has(n.id)) continue;
+        seen.add(n.id);
+        out.push(
+          toHit({
+            key: n.id,
+            positionId: n.id,
+            userId: n.user_id,
+            planId,
+            status: statusOf(n),
+            parentLabel: parentFromLive(n),
+            position: n.position,
+            live: true,
+          }),
+        );
+      }
+    }
+
+    const rank = (s: string) => (s === "ACTIVE" ? 0 : s === "RESERVED" ? 1 : s === "HISTORY" ? 2 : 3);
+    return out.sort((a, b) => a.member.localeCompare(b.member) || rank(a.status) - rank(b.status) || a.key.localeCompare(b.key));
+  }, [debouncedQ, liveTree, enrichedUsers, matchedUserIds, historyByUser, searchAllPlans, planId, plans, txs, userById]);
+
+  const waitingHistory = matchedUserIds.some((id) => !historyByUser.has(id));
+  const noMatch = Boolean(debouncedQ.trim()) && searchHits.length === 0 && !waitingHistory;
 
   function selectNode(node: NetNode, fromSearch = false) {
     setSelectedId(node.id);
     setHistoryOpen(fromSearch);
-    const parent = parentOf(liveTree, node);
-    if (fromSearch) {
-      const branch = node.position ? `${node.position} branch` : "root";
-      const under = parent?.user?.referral_code;
-      setSearchNote(under ? `Found in ${branch} under ${under}` : `Found at ${branch}`);
-    } else {
-      setSearchStats(null);
-    }
+    if (fromSearch) setFocusNonce((n) => n + 1);
     requestAnimationFrame(() => {
       document.getElementById(`gx-node-${node.id}`)?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
     });
   }
 
-  function runSearch(value: string) {
-    const needle = value.trim().toLowerCase();
-    setQ(value);
-    if (!needle) {
-      setSearchNote("");
-      setSearchStats(null);
+  function applyHit(hit: SearchHit) {
+    setSearchOpen(false);
+    const live = hit.positionId ? liveTree.find((n) => n.id === hit.positionId) : undefined;
+    const fallback =
+      liveTree.find((n) => n.user_id === hit.userId && (n.status ?? "ACTIVE") === "ACTIVE") ??
+      liveTree.find((n) => n.user_id === hit.userId);
+    const node = live ?? fallback;
+    if (node) selectNode(node, true);
+    else setHistoryOpen(true);
+  }
+
+  function focusHit(hit: SearchHit) {
+    if (hit.planId && hit.planId !== planId && onPlanId) {
+      setPendingFocus({ positionId: hit.positionId, userId: hit.userId });
+      setHistoryOpen(true);
+      onPlanId(hit.planId);
+      setSearchOpen(false);
       return;
     }
-    const user =
-      users.find(
-        (u) =>
-          u.referral_code.toLowerCase().includes(needle) ||
-          (u.display_name ?? "").toLowerCase().includes(needle) ||
-          u.id.toLowerCase().includes(needle) ||
-          (u.wallet ?? "").toLowerCase().includes(needle),
-      ) ?? userByWallet.get(needle);
+    applyHit(hit);
+  }
+
+  useEffect(() => {
+    if (!pendingFocus) return;
     const node =
-      (user
-        ? liveTree.find((n) => n.user_id === user.id && (n.status ?? "ACTIVE") === "ACTIVE") ??
-          liveTree.find((n) => n.user_id === user.id)
-        : undefined) ??
-      liveTree.find(
-        (n) =>
-          n.user_id.toLowerCase().includes(needle) ||
-          (n.user?.referral_code ?? "").toLowerCase().includes(needle) ||
-          (n.user?.display_name ?? "").toLowerCase().includes(needle),
-      );
+      (pendingFocus.positionId ? liveTree.find((n) => n.id === pendingFocus.positionId) : undefined) ??
+      liveTree.find((n) => n.user_id === pendingFocus.userId && (n.status ?? "ACTIVE") === "ACTIVE") ??
+      liveTree.find((n) => n.user_id === pendingFocus.userId);
     if (node) {
       selectNode(node, true);
-    } else {
-      setSearchNote("No matching member in the loaded Global tree.");
-      setSearchStats(null);
+      setPendingFocus(null);
+      return;
     }
-  }
+    if (!loading) setPendingFocus(null);
+  }, [liveTree, pendingFocus, loading]);
 
   const myDirect = selectedNode ? refs.find((r) => r.user_id === selectedNode.user_id) : undefined;
   const planTxs = useMemo(
@@ -438,8 +632,8 @@ export function GlobalNetworkTree({
   const routeTx = [...memberTxs]
     .filter((t) => t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY")
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-  const leftChild = selectedNode ? displayTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
-  const rightChild = selectedNode ? displayTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
+  const leftChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "LEFT") : undefined;
+  const rightChild = selectedNode ? liveTree.find((n) => n.parent_id === selectedNode.id && n.position === "RIGHT") : undefined;
   const reservedSelected = statusOf(selectedNode ?? undefined) === "RESERVED";
   const newParentUser = globalParent ? userById.get(globalParent.user_id) : undefined;
   const journey = useMemo(
@@ -462,17 +656,25 @@ export function GlobalNetworkTree({
   );
   const counts = journeyCounts(journey);
   const previousHistory = [...historyRows].filter((p) => p.status === "HISTORY").sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? ""))).at(-1);
+  const userLiveSeats = selectedNode ? liveTree.filter((n) => n.user_id === selectedNode.user_id) : [];
+  const activeSeat = userLiveSeats.find((n) => statusOf(n) === "ACTIVE");
+  const reservedSeat = userLiveSeats.find((n) => statusOf(n) === "RESERVED");
+  const positionHistory = [...historyRows].sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? "")));
 
-  useEffect(() => {
-    if (!searchNote || !selectedNode) return;
-    setSearchStats({
-      previous: counts.previous,
-      reentries: counts.reentries,
-      parent: globalParent?.user?.referral_code ?? (selectedNode.parent_id ? undefined : "Root"),
-      position: selectedNode.position,
-      status: statusOf(selectedNode),
-    });
-  }, [searchNote, selectedNode, counts.previous, counts.reentries, globalParent]);
+  function seatCaption(node?: NetNode | null, row?: JourneyPosition) {
+    const n = node;
+    const parent = n ? parentOf(liveTree, n) : null;
+    const parentLabel = n
+      ? n.parent_id
+        ? parent?.user?.referral_code ?? "—"
+        : "ROOT"
+      : row
+        ? row.parent_code ?? (row.parent_id ? "—" : "ROOT")
+        : "—";
+    const leg = n?.position ?? row?.position ?? "ROOT";
+    const st = n ? statusOf(n) : row?.status ?? "—";
+    return `${parentLabel} · ${leg} · ${st}`;
+  }
 
   function journeyBlock() {
     if (journey.length === 0) return <p className="text-sm text-mute">No stored positions for this plan.</p>;
@@ -652,6 +854,41 @@ export function GlobalNetworkTree({
           </section>
         )}
         <section>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Global Position Summary</p>
+          <p className="mt-2 text-secondary">Current Active Position</p>
+          <p className="text-cream">{activeSeat ? seatCaption(activeSeat) : "—"}</p>
+          <p className="mt-2 text-secondary">Reserved Position</p>
+          <p className="text-cream">{reservedSeat ? `${seatCaption(reservedSeat)}${reservedSeat.reentry_tx_hash ? "" : " · Payment Required"}` : "—"}</p>
+          <p className="mt-2 text-secondary">Previous Positions</p>
+          <p className="text-cream">{counts.previous}</p>
+          <p className="mt-2 text-secondary">Total Re-entries</p>
+          <p className="text-cream">{counts.reentries}</p>
+        </section>
+        <section>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Position History</p>
+          {positionHistory.length === 0 ? (
+            <p className="mt-2 text-sm text-mute">No stored positions for this plan.</p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {positionHistory.map((row, i) => (
+                <div key={row.id} className="rounded-xl border border-line bg-white/[0.02] p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet">#{i + 1}</p>
+                  <p className="mt-1 text-xs text-secondary">Parent</p>
+                  <p className="text-cream">{row.parent_code ?? (row.parent_id ? "—" : "ROOT")}</p>
+                  <p className="mt-1 text-xs text-secondary">LEFT / RIGHT</p>
+                  <p className="text-cream">{row.position ?? "ROOT"}</p>
+                  <p className="mt-1 text-xs text-secondary">Status</p>
+                  <StatusBadge status={row.status ?? "ACTIVE"} />
+                  <p className="mt-1 text-xs text-secondary">Started</p>
+                  <p className="text-cream">{row.started_at ? new Date(row.started_at).toLocaleString() : "—"}</p>
+                  <p className="mt-1 text-xs text-secondary">Ended</p>
+                  <p className="text-cream">{row.ended_at ? new Date(row.ended_at).toLocaleString() : "—"}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        <section>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Plan</p>
           <p className="mt-2 text-cream">{planLabel(selectedUser?.current_plan) ?? "—"}</p>
           <p className="mt-1 text-secondary">{selectedUser?.current_plan ?? "No confirmed plan"}</p>
@@ -694,40 +931,85 @@ export function GlobalNetworkTree({
 
 
 
+  function HitList({ compact }: { compact: boolean }) {
+    return (
+      <ul className={compact ? "divide-y divide-line" : "space-y-2"}>
+        {searchHits.map((hit) => (
+          <li key={hit.key}>
+            <button
+              type="button"
+              onClick={() => focusHit(hit)}
+              className={`w-full text-left ${compact ? "px-3 py-2.5 hover:bg-white/5" : "rounded-xl border border-line bg-[#0B1220] p-3"}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-cream">{hit.member}</p>
+                {hit.status === "no position" ? (
+                  <span className="text-[10px] uppercase tracking-wide text-mute">no position</span>
+                ) : (
+                  <StatusBadge status={hit.status} />
+                )}
+              </div>
+              <p className="mt-0.5 font-mono text-[11px] text-mute">{hit.wallet === "—" ? "—" : shortAddr(hit.wallet)}</p>
+              <p className="mt-1 text-[11px] text-secondary">
+                {hit.planName} · {hit.status}
+                {hit.paymentRequired ? " · Payment Required" : ""}
+              </p>
+              <p className="text-[11px] text-mute">
+                Parent: {hit.parentLabel} · {hit.position ?? "ROOT"} · Previous {hit.previous} · Re-entries {hit.reentries}
+              </p>
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <div>
-      <div className="flex flex-col gap-4">
+      <div className="relative flex flex-col gap-3">
         <label className="relative block w-full">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-mute" />
           <input
             value={q}
-            onChange={(e) => runSearch(e.target.value)}
-            placeholder="Search wallet address or referral code…"
-            className="min-h-12 w-full rounded-2xl border border-line bg-[#0D1424] pl-10 pr-4 text-sm text-cream outline-none placeholder:text-mute focus:border-violet/40"
+            onChange={(e) => {
+              setQ(e.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => setSearchOpen(true)}
+            placeholder="Search wallet address or referral code..."
+            className="min-h-12 w-full rounded-2xl border border-line bg-surface2 pl-10 pr-4 text-sm text-cream outline-none placeholder:text-mute focus:border-violet/40"
           />
         </label>
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
-          <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
-          <p className="mt-1 max-w-2xl text-sm text-secondary">
-            Existing confirmed positions remain unchanged. Previous seats stay visible as HISTORY. Current seats are ACTIVE.
-            Unpaid re-entry shows as RESERVED on the real next parent (first-empty: top to bottom, LEFT then RIGHT).
-          </p>
-        </div>
-      </div>
-      {searchNote && (
-        <div className="mt-2 rounded-xl border border-line bg-[#0B1220] p-3 text-sm">
-          <p className="text-secondary">{searchNote}</p>
-          {searchStats && selectedNode && (
-            <div className="mt-2 grid gap-1 text-xs text-cream">
-              <p>Current parent: {searchStats.parent ?? "—"}</p>
-              <p>Current leg: {searchStats.position ?? "ROOT"}</p>
-              <p>Current status: {searchStats.status}</p>
-              <p className="text-mute">Previous positions: {searchStats.previous} · Re-entries: {searchStats.reentries}</p>
+        <label className="inline-flex items-center gap-2 text-xs text-secondary">
+          <input
+            type="checkbox"
+            checked={searchAllPlans}
+            onChange={(e) => setSearchAllPlans(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-line"
+          />
+          Search all plans
+        </label>
+        {searchOpen && debouncedQ.trim() && (
+          <>
+            <div className="space-y-2 lg:hidden">
+              {noMatch ? (
+                <p className="rounded-xl border border-line bg-[#0B1220] p-3 text-sm text-secondary">No matching wallet or referral code found.</p>
+              ) : (
+                <HitList compact={false} />
+              )}
             </div>
-          )}
-        </div>
-      )}
+            <div className="z-30 hidden overflow-hidden rounded-2xl border border-line bg-[#0B1220] shadow-card lg:block">
+              {noMatch ? (
+                <p className="p-3 text-sm text-secondary">No matching wallet or referral code found.</p>
+              ) : (
+                <div className="max-h-80 overflow-y-auto">
+                  <HitList compact />
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="mt-4 space-y-3 lg:hidden">
         {selectedNode ? (
@@ -787,7 +1069,7 @@ export function GlobalNetworkTree({
         </div>
       )}
 
-      <div className="mt-5 hidden overflow-hidden rounded-[20px] border border-[rgba(124,92,255,0.18)] bg-[#080D19] shadow-card lg:block">
+      <div className="mt-5 hidden overflow-hidden rounded-[20px] border border-[rgba(124,92,255,0.16)] bg-[#050811] shadow-card lg:block">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-3 sm:px-4">
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-[11px] text-mute">
@@ -811,8 +1093,9 @@ export function GlobalNetworkTree({
             <div
               className="relative min-h-[560px] overflow-hidden lg:min-h-[640px]"
               style={{
-                backgroundImage: "radial-gradient(rgba(154,168,199,0.09) 1px, transparent 1px)",
+                backgroundImage: "radial-gradient(rgba(148,163,184,0.10) 1px, transparent 1px)",
                 backgroundSize: "18px 18px",
+                backgroundColor: "#050811",
               }}
             >
               {loading && (
@@ -832,6 +1115,7 @@ export function GlobalNetworkTree({
               )}
               {!loading && liveTree.length > 0 && (
                 <TransformWrapper minScale={0.25} maxScale={2.2} centerOnInit>
+                  <TreeFocus nodeId={selectedId} nonce={focusNonce} />
                   <div className="absolute right-3 top-3 z-10">
                     <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} />
                   </div>
@@ -888,15 +1172,6 @@ export function GlobalNetworkTree({
                                   (h) => !h.parent_id && statusOf(p.vis.node) === "RESERVED",
                                 )),
                           )}
-                          phase={
-                            p.vis.node?.status === "RESERVED"
-                              ? "next"
-                              : p.vis.node?.status === "HISTORY"
-                                ? undefined
-                                : p.vis.node?.from_position_id
-                                  ? "now"
-                                  : undefined
-                          }
                         />
                       ))}
                     </div>
@@ -914,13 +1189,13 @@ export function GlobalNetworkTree({
                   <span className="h-0.5 w-5 bg-electric" /> Right Position
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-mint" /> NOW · ACTIVE
+                  <span className="h-2 w-2 rounded-full bg-mint" /> ACTIVE
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-4 border border-dashed border-warning" /> NEXT · RESERVED
+                  <span className="h-2 w-2 rounded-full bg-warning" /> RESERVED
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-4 border border-dashed border-mute/50" /> WAS · HISTORY (old seat in tree)
+                  <span className="h-2 w-2 rounded-full bg-mute/50" /> EMPTY
                 </span>
               </div>
             )}

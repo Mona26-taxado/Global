@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ButtonHTMLAttributes, ComponentType, ReactNode } from "react";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { cn, shortAddr } from "@/lib/utils";
@@ -44,6 +44,50 @@ export function StatCard({
       <div className="mt-2 truncate font-display text-[22px] leading-8 text-cream tabular sm:text-[30px] sm:leading-9">{value}</div>
       {hint && <p className="mt-1 text-xs text-mute">{hint}</p>}
     </div>
+  );
+}
+
+export function AdminKpi({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: ReactNode;
+  icon?: ComponentType<{ className?: string }>;
+}) {
+  return (
+    <div className="rounded-[16px] border border-line bg-surface2/90 p-4 shadow-card backdrop-blur-sm">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-mute">{label}</p>
+        {Icon && <Icon className="h-3.5 w-3.5 text-violet/80" />}
+      </div>
+      <div className="mt-2 font-display text-[22px] tabular leading-7 text-cream sm:text-[26px]">{value}</div>
+    </div>
+  );
+}
+
+export function ToolbarButton({
+  children,
+  active,
+  onClick,
+  className,
+  type = "button",
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      className={cn(
+        "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs transition",
+        active ? "border-violet/40 bg-violet/15 text-cream" : "border-line bg-elevated/80 text-secondary hover:text-cream",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </button>
   );
 }
 
