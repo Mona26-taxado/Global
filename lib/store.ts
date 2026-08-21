@@ -109,6 +109,7 @@ function migrate(store: Store): Store {
     status: p.status ?? "ACTIVE",
     started_at: p.started_at ?? nowIso(),
     ended_at: p.ended_at ?? null,
+    funded_by_user_id: p.funded_by_user_id ?? null,
   }));
   const refs = store.referrals ?? [];
   const seen = new Map<string, number>();

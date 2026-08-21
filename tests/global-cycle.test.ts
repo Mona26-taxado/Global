@@ -172,7 +172,8 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const cRef = await assignSponsor("user_c", "GXCCCCCC");
     expect(cRef.direct_number).toBe(2);
     const cPay = await resolvePlanRecipient("user_c", "PLAN_100");
-    expect(cPay.recipientUserId).toBe("user_a");
+    expect(cPay.recipientUserId).toBe("user_x");
+    expect(cPay.positionId).toBe(reservedPosition((await readStore()).network_positions, "user_a")?.id);
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_y")?.parent_id).toBe(
       currentPosition(store.network_positions, "user_a")?.id,
@@ -210,7 +211,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(yPay.recipientUserId).toBe("user_x");
     expect(zPay.recipientUserId).toBe("user_a");
     expect(bPay.recipientUserId).toBe("user_y");
-    expect(cPay.recipientUserId).toBe("user_a");
+    expect(cPay.recipientUserId).toBe("user_x");
     expect(dPay.recipientUserId).toBe("user_z");
     expect(ePay.recipientUserId).toBe("user_x");
   });

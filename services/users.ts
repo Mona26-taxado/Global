@@ -163,6 +163,7 @@ function insertPosition(
     recipient_user_id: extra.recipient_user_id ?? null,
     recipient_wallet: extra.recipient_wallet ?? null,
     reentry_tx_hash: extra.reentry_tx_hash ?? null,
+    funded_by_user_id: extra.funded_by_user_id ?? null,
   };
   store.network_positions.push(row);
   return row;
@@ -239,7 +240,10 @@ export async function placeUser(userId: string, planId?: string): Promise<Networ
   return withStore((store) => {
     const plan = resolvePlanId(store, planId);
     const existing = currentPosition(store.network_positions, userId, plan);
-    if (existing) return existing;
+    if (existing) {
+      maybeReenterAncestors(store, existing);
+      return existing;
+    }
     const row = insertActivePosition(store, userId, plan);
     maybeReenterAncestors(store, row);
     return row;

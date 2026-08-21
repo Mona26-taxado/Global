@@ -9,7 +9,7 @@ import {
 } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
 import { parsePaymentType } from "@/payments/payment-type";
-import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment } from "@/payments/plan-routing";
+import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment, unpaidDirect2Funder } from "@/payments/plan-routing";
 import { activateReservedReentry, cycleComplete, currentPosition, positionsForPlan, reservedPosition } from "@/services/users";
 import {
   hasConfirmedPlan,
@@ -31,6 +31,13 @@ function isRetryableRpcError(error: unknown) {
 
 export function amountToUnits(usd: number, decimals = 6) {
   return BigInt(usd) * BigInt(10) ** BigInt(decimals);
+}
+
+async function activateReservedIfDirect2Funded(positionId: string, txHash: Hash) {
+  const store = await readStore();
+  const pos = store.network_positions.find((p) => p.id === positionId);
+  if (!pos || pos.status !== "RESERVED") return;
+  await activateReservedReentry(pos.user_id, txHash, pos.plan_id);
 }
 
 export async function getRegistration(userId: string): Promise<RegistrationRow | null> {
@@ -167,6 +174,9 @@ export async function confirmPayment(input: {
     if (existingEarly.payment_type === "GLOBAL_REENTRY") {
       await activateReservedReentry(input.userId, input.txHash, existingEarly.plan_id ?? input.planId);
     }
+    if (existingEarly.payment_type === "PLAN_PURCHASE" && existingEarly.position_id) {
+      await activateReservedIfDirect2Funded(existingEarly.position_id, input.txHash);
+    }
     let registration = await getRegistration(input.userId);
     if (existingEarly.payment_type === "REGISTRATION" && registration && registration.status !== "ACTIVE") {
       registration = await withStore((store) => {
@@ -274,6 +284,9 @@ export async function confirmPayment(input: {
     if (prepared.paymentType === "GLOBAL_REENTRY") {
       await activateReservedReentry(input.userId, input.txHash, "planId" in prepared ? prepared.planId : undefined);
     }
+    if (prepared.paymentType === "PLAN_PURCHASE" && "positionId" in prepared && prepared.positionId) {
+      await activateReservedIfDirect2Funded(prepared.positionId, input.txHash);
+    }
     return { transaction, registration };
   } catch (error) {
     const pending =
@@ -333,12 +346,14 @@ export async function listUserPlans(userId: string) {
     const reserved = reservedPosition(store.network_positions, userId, plan.id);
     const missing = directs.filter((d) => !hasConfirmedPlan(store.transactions, d.user_id, plan.id));
     const waiting = membership && !pos;
-    const reentryRequired = Boolean(reserved) || Boolean(pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id));
+    const cycleDone = Boolean(pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id));
+    const fundedByDirect2 = Boolean(reserved?.funded_by_user_id) || Boolean(reserved && unpaidDirect2Funder(store, reserved));
+    const reentryRequired = fundedByDirect2 ? false : Boolean(reserved) || cycleDone;
     const global_status = planViewState({
       unlocked,
       membership,
       globalActive: Boolean(pos),
-      reentryRequired: reentryRequired && Boolean(reserved || (pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id))),
+      reentryRequired,
       waitingForDirects: waiting,
     });
     return {

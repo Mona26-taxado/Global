@@ -117,6 +117,8 @@ export type NetworkPositionRow = {
   recipient_user_id?: string | null;
   recipient_wallet?: string | null;
   reentry_tx_hash?: string | null;
+  /** Direct #2 buyer whose plan payment funds this reserved movement. Blocks a second GLOBAL_REENTRY for the same cycle. */
+  funded_by_user_id?: string | null;
 };
 
 export type GlobalConfig = {

@@ -1,7 +1,7 @@
 import { isAddress } from "viem";
 import { activeChainId, paymentRecipient } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
-import { cycleComplete } from "@/network/placement";
+import { cycleComplete, occupiesSlot } from "@/network/placement";
 import {
   buyerDirectNumber,
   currentPosition,
@@ -12,7 +12,7 @@ import {
   reservedPosition,
 } from "@/services/users";
 import { isPlanUnlocked, qualifiesForPlanGlobal, basePlan } from "@/lib/plan-progress";
-import type { NetworkPositionRow } from "@/types";
+import type { NetworkPositionRow, ReferralRow } from "@/types";
 
 export class PlanRoutingError extends Error {
   code: string;
@@ -204,7 +204,30 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
     );
   }
   const placed = await placeUser(sponsor.id, planId);
-  const parentId = globalParentUserId((await readStore()).network_positions, sponsor.id, planId);
+  const afterPlace = await readStore();
+  const reservedForThisEvent = movementReservedByPlacement(
+    afterPlace.network_positions,
+    afterPlace.referrals,
+    placed,
+    buyer.id,
+  );
+
+  if (reservedForThisEvent) {
+    const bound = await snapshotReservedRecipient(reservedForThisEvent.id, buyer.id);
+    return {
+      recipient: bound.recipientWallet,
+      recipientUserId: bound.recipientUserId,
+      recipientRole: "GLOBAL_UPLINE",
+      slot: 2,
+      directNumber: 2,
+      globalParentUserId: bound.recipientUserId,
+      positionId: reservedForThisEvent.id,
+      notice:
+        "Direct #2: Global movement was reserved first. This plan payment goes to the reserved seat’s new Global upline. No separate re-entry payment is required for this cycle.",
+    };
+  }
+
+  const parentId = globalParentUserId(afterPlace.network_positions, sponsor.id, planId);
   if (!placed.parent_id || !parentId) {
     throw new PlanRoutingError(
       "GLOBAL_UPLINE_NOT_READY",
@@ -226,6 +249,91 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
     notice:
       "Direct #2: your sponsor is placed in Global first. This transfer goes to their Global upline wallet, not to the sponsor.",
   };
+}
+
+/** Child that filled the parent's second live seat (LEFT then RIGHT; later started_at wins on a tie). */
+export function completingChildOf(
+  positions: NetworkPositionRow[],
+  parentPositionId: string,
+): NetworkPositionRow | null {
+  const kids = positions.filter((p) => p.parent_id === parentPositionId && occupiesSlot(p));
+  if (kids.length < 2) return null;
+  const ordered = [...kids].sort((a, b) => {
+    const t = (a.started_at ?? "").localeCompare(b.started_at ?? "");
+    if (t !== 0) return t;
+    return (a.position === "LEFT" ? 0 : 1) - (b.position === "LEFT" ? 0 : 1);
+  });
+  return ordered[ordered.length - 1] ?? null;
+}
+
+/**
+ * Reserved seat for the cycle this Direct #2 placement completed.
+ * Retry of the same buyer keeps that reserved parent; another buyer cannot take it.
+ */
+export function movementReservedByPlacement(
+  positions: NetworkPositionRow[],
+  referrals: ReferralRow[],
+  placed: NetworkPositionRow,
+  buyerId: string,
+): NetworkPositionRow | null {
+  if (!placed.parent_id) return null;
+  const parentPos = positions.find((p) => p.id === placed.parent_id);
+  if (!parentPos) return null;
+  if (!cycleComplete(positionsForPlan(positions, placed.plan_id), parentPos.id)) return null;
+  const reserved = reservedPosition(positions, parentPos.user_id, placed.plan_id);
+  if (!reserved || reserved.status !== "RESERVED" || reserved.reentry_tx_hash) return null;
+  if (reserved.from_position_id && reserved.from_position_id !== parentPos.id) return null;
+  if (reserved.funded_by_user_id && reserved.funded_by_user_id !== buyerId) return null;
+  if (reserved.funded_by_user_id === buyerId) return reserved;
+  const completing = completingChildOf(positions, parentPos.id);
+  if (!completing || completing.id !== placed.id) return null;
+  const d2 = referrals.find((r) => r.sponsor_id === placed.user_id && r.direct_number === 2);
+  if (d2?.user_id !== buyerId) return null;
+  return reserved;
+}
+
+export function unpaidDirect2Funder(
+  store: {
+    network_positions: NetworkPositionRow[];
+    referrals: ReferralRow[];
+    transactions: { user_id: string; plan_id: string | null; payment_type: string; status: string }[];
+  },
+  reserved: NetworkPositionRow,
+): string | null {
+  const from = store.network_positions.find((p) => p.id === reserved.from_position_id);
+  if (!from) return null;
+  const completing = completingChildOf(store.network_positions, from.id);
+  if (!completing) return null;
+  const d2 = store.referrals.find((r) => r.sponsor_id === completing.user_id && r.direct_number === 2);
+  if (!d2) return null;
+  const paid = store.transactions.some(
+    (t) =>
+      t.user_id === d2.user_id &&
+      t.plan_id === reserved.plan_id &&
+      t.payment_type === "PLAN_PURCHASE" &&
+      t.status === "CONFIRMED",
+  );
+  return paid ? null : d2.user_id;
+}
+
+async function snapshotReservedRecipient(reservedId: string, buyerId: string) {
+  return withStore((s) => {
+    const row = s.network_positions.find((p) => p.id === reservedId);
+    if (!row || row.status !== "RESERVED") {
+      throw new PlanRoutingError("GLOBAL_UPLINE_NOT_READY", "Reserved Global seat is not ready.");
+    }
+    if (row.funded_by_user_id && row.funded_by_user_id !== buyerId) {
+      throw new PlanRoutingError(
+        "REENTRY_RECIPIENT_MISMATCH",
+        "This movement is already reserved for another Direct #2 payment.",
+      );
+    }
+    const bound = reentryRecipientFromReserved(s, row);
+    row.funded_by_user_id = buyerId;
+    row.recipient_user_id = bound.recipientUserId;
+    row.recipient_wallet = bound.recipientWallet;
+    return bound;
+  });
 }
 
 export function currentQualifyingPlan(store: { transactions: { user_id: string; payment_type: string; status: string; plan_id: string | null; plan_code: string; created_at: string }[]; plans: { id: string; code: string; amount_usd: number; active?: boolean; enabled?: boolean }[] }, userId: string) {
@@ -322,6 +430,12 @@ export async function resolveReentryPayment(userId: string, planId?: string): Pr
     throw new PlanRoutingError(
       "REENTRY_NOT_REQUIRED",
       "This member has not completed both Global legs, so re-entry payment is not required.",
+    );
+  }
+  if (reserved.funded_by_user_id || unpaidDirect2Funder(store, reserved)) {
+    throw new PlanRoutingError(
+      "REENTRY_FUNDED_BY_DIRECT2",
+      "This cycle is funded by the Direct #2 plan payment that completed it. A separate re-entry payment is not required.",
     );
   }
   const bound = reentryRecipientFromReserved(store, reserved);
