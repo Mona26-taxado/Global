@@ -1,4 +1,4 @@
-import { cycleComplete, findPlacement, findReentryPlacement, liveNodes } from "@/network/placement";
+import { cycleComplete, findPowerlinePlacement, findReentryPlacement, liveNodes } from "@/network/placement";
 import { makeReferralCode, newId, readStore, supabaseEnabled, withStore } from "@/lib/store";
 import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
@@ -143,13 +143,11 @@ function insertPosition(
   extra: Partial<NetworkPositionRow> & {
     status: NetworkPositionRow["status"];
     plan_id: string;
-    reentry_frontline_id?: string;
   },
 ): NetworkPositionRow {
   const live = activePositions(store.network_positions, extra.plan_id);
-  const placement = extra.reentry_frontline_id
-    ? findReentryPlacement(live, extra.reentry_frontline_id, userId)
-    : findPlacement(live, userId);
+  const placement =
+    extra.status === "RESERVED" ? findReentryPlacement(live, userId) : findPowerlinePlacement(live, userId);
   const started = extra.started_at ?? (extra.status === "ACTIVE" ? nowIso() : null);
   const row: NetworkPositionRow = {
     id: newId("pos"),
@@ -193,16 +191,11 @@ export function qualifyForReentryInStore(store: StoreShape, userId: string, plan
   const current = currentPosition(store.network_positions, userId, plan);
   if (!current) return null;
   if (!cycleComplete(positionsForPlan(store.network_positions, plan), current.id)) return current;
-  const leftChild = positionsForPlan(store.network_positions, plan).find(
-    (p) => p.parent_id === current.id && p.position === "LEFT" && (p.status ?? "ACTIVE") === "ACTIVE",
-  );
-  if (!leftChild) return current;
   const reserved = insertPosition(store, userId, {
     status: "RESERVED",
     plan_id: plan,
     from_position_id: current.id,
     reentry_tx_hash: null,
-    reentry_frontline_id: leftChild.id,
   });
   const recipientUserId = parentUserId(store, reserved.parent_id);
   reserved.recipient_user_id = recipientUserId;

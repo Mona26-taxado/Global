@@ -146,7 +146,7 @@ export const DEFAULT_GLOBAL_CONFIG = {
   qualification_rule: "Direct #2 of a member with this plan ACTIVE places that member in Global.",
   global_entry_condition: "Enter Global on Direct #2. Direct #1 pays the sponsor; Direct #2 pays the new Global parent.",
   two_branch_cycle: "Each Global position has LEFT and RIGHT. Level order fills LEFT then RIGHT.",
-  placement_rule: "Deterministic left-descending DFS (powerline) from the live/reserved tree. Re-entry uses the LEFT/first child’s next hole (LEFT then RIGHT).",
+  placement_rule: "Direct #2 Global entry uses left-descending DFS (powerline). Paid re-entry uses a separate BFS first-empty seat (LEFT before RIGHT) on that plan’s live tree.",
   cycle_completion: "A Global cycle completes with two ACTIVE seats on the left frontline (LEFT + LEFT.LEFT) or with ACTIVE LEFT + RIGHT after rotation.",
   position_movement: "When both Global legs complete, the member’s current seat is history and a new active seat is opened. Old rows are never deleted.",
 };

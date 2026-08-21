@@ -58,14 +58,76 @@ describe("global placement (left-descending powerline)", () => {
     expect(next.position).toBe("LEFT");
   });
 
-  it("re-entry under the LEFT child fills RIGHT when LEFT is taken", () => {
+  it("re-entry CASE 1: A with only LEFT X → A.RIGHT, not X.LEFT", () => {
+    const nodes = [
+      { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+    ];
+    const hole = findReentryPlacement(nodes, "M");
+    expect(hole.parent_id).toBe("pos-A");
+    expect(hole.position).toBe("RIGHT");
+  });
+
+  it("re-entry CASE 2: A.LEFT X and A.RIGHT Y → X.LEFT", () => {
+    const nodes = [
+      { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-Y", user_id: "Y", parent_id: "pos-A", position: "RIGHT" as const, depth: 1, status: "ACTIVE" as const },
+    ];
+    const hole = findReentryPlacement(nodes, "M");
+    expect(hole.parent_id).toBe("pos-X");
+    expect(hole.position).toBe("LEFT");
+  });
+
+  it("re-entry CASE 3: Z under X.LEFT → X.RIGHT", () => {
+    const nodes = [
+      { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-Y", user_id: "Y", parent_id: "pos-A", position: "RIGHT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-Z", user_id: "Z", parent_id: "pos-X", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+    ];
+    const hole = findReentryPlacement(nodes, "M");
+    expect(hole.parent_id).toBe("pos-X");
+    expect(hole.position).toBe("RIGHT");
+  });
+
+  it("re-entry CASE 4: RESERVED A.RIGHT is not reused; next is X.LEFT", () => {
+    const nodes = [
+      { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-R", user_id: "R", parent_id: "pos-A", position: "RIGHT" as const, depth: 1, status: "RESERVED" as const },
+    ];
+    const hole = findReentryPlacement(nodes, "M");
+    expect(hole.parent_id).toBe("pos-X");
+    expect(hole.position).toBe("LEFT");
+  });
+
+  it("re-entry CASE 5: plan live sets are independent", () => {
+    const p1 = [
+      { id: "p1-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "p1-X", user_id: "X", parent_id: "p1-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+    ];
+    const p2 = [
+      { id: "p2-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "p2-X", user_id: "X", parent_id: "p2-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "p2-Y", user_id: "Y", parent_id: "p2-A", position: "RIGHT" as const, depth: 1, status: "ACTIVE" as const },
+    ];
+    const h1 = findReentryPlacement(p1, "M");
+    const h2 = findReentryPlacement(p2, "M");
+    expect(h1.parent_id).toBe("p1-A");
+    expect(h1.position).toBe("RIGHT");
+    expect(h2.parent_id).toBe("p2-X");
+    expect(h2.position).toBe("LEFT");
+  });
+
+  it("screenshot case: empty A.RIGHT is taken before any deeper re-entry hole", () => {
     const nodes = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
       { id: "pos-Y", user_id: "Y", parent_id: "pos-X", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
     ];
-    const hole = findReentryPlacement(nodes, "pos-X", "A");
-    expect(hole.parent_id).toBe("pos-X");
+    const hole = findReentryPlacement(nodes, "M");
+    expect(hole.parent_id).toBe("pos-A");
     expect(hole.position).toBe("RIGHT");
   });
 
