@@ -83,6 +83,13 @@ export function friendlyMessage(raw?: string | null): { title: string; detail: s
   if (/reentry_not_required|not completed both/.test(lower)) {
     return { title: "Re-entry is not due", detail: "Re-entry pay is only required after both Global legs of your current seat are filled.", tone: "info" };
   }
+  if (/reentry_recipient_mismatch|reentry_self_pay/.test(lower)) {
+    return {
+      title: "Re-entry recipient is blocked",
+      detail: "This payment must go to the new Global parent’s verified wallet, not to your own wallet or the company.",
+      tone: "error",
+    };
+  }
 
   if (/^[A-Z0-9_]{6,}$/.test(text) || text.length > 180 || text.includes("{") || text.includes("Signer Error")) {
     return { title: "Payment failed", detail: "Please try again. If it keeps failing, check USDT and POL in this wallet.", tone: "error" };

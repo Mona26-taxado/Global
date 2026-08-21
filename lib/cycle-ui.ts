@@ -139,18 +139,11 @@ export function logicalCurrentTree(persisted: NetNode[]): NetNode[] {
   const addReserved = (from: NetNode) => {
     if (out.some((n) => n.user_id === from.user_id && n.status === "RESERVED")) return;
     const apiReserved = live.find((p) => p.user_id === from.user_id && p.status === "RESERVED");
-    const hole = findFirstEmptyPlacement(occupy(), from.user_id);
+    if (!apiReserved) return;
     out.push({
-      ...(apiReserved ?? from),
-      id: apiReserved?.id ?? `logical_reserved_${from.id}`,
-      parent_id: hole.parent_id,
-      position: hole.position,
-      depth: hole.depth,
-      cycle: Math.floor(hole.depth / 2),
-      status: "RESERVED",
-      from_position_id: from.id,
+      ...apiReserved,
+      from_position_id: apiReserved.from_position_id ?? from.id,
       source_is_root: !from.parent_id,
-      reentry_tx_hash: apiReserved?.reentry_tx_hash ?? null,
     });
   };
 

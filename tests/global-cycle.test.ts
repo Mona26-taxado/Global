@@ -354,6 +354,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(pay.recipient.toLowerCase()).toBe((reserved?.recipient_wallet ?? "").toLowerCase());
     expect(pay.amountUsd).toBe(100);
     expect(pay.recipient.toLowerCase()).toBe(ADDR.X);
+    expect(pay.recipient.toLowerCase()).not.toBe(ADDR.A);
 
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_a")?.status ?? "ACTIVE").toBe("ACTIVE");
@@ -393,5 +394,41 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(store.network_positions.filter((p) => p.user_id === "user_a" && p.status === "HISTORY")).toHaveLength(2);
     expect(currentPosition(store.network_positions, "user_a")?.id).toBe(reserved2?.id);
     expect(currentPosition(store.network_positions, "user_a")?.reentry_tx_hash).toBe("0xreentry2");
+  });
+
+  it("blocks GLOBAL_REENTRY when snapshot is the mover wallet instead of the parent", async () => {
+    await member("user_a", "GXAAAAAA", "A");
+    await member("user_x", "GXBBBBBB", "X");
+    await member("user_y", "GXCCCCCC", "Y");
+    await confirmPlan("user_a", "A");
+    await placeUser("user_a");
+    await placeUser("user_x");
+    await placeUser("user_y");
+    await qualifyForReentry("user_a");
+    await withStore((store) => {
+      const row = reservedPosition(store.network_positions, "user_a")!;
+      row.recipient_user_id = "user_a";
+      row.recipient_wallet = ADDR.A;
+    });
+    await expect(resolveReentryPayment("user_a")).rejects.toMatchObject({ code: "REENTRY_RECIPIENT_MISMATCH" });
+  });
+
+  it("blocks GLOBAL_REENTRY when the parent wallet is unverified and does not use a fallback", async () => {
+    await member("user_a", "GXAAAAAA", "A");
+    await member("user_x", "GXBBBBBB", "X");
+    await member("user_y", "GXCCCCCC", "Y");
+    await confirmPlan("user_a", "A");
+    await placeUser("user_a");
+    await placeUser("user_x");
+    await placeUser("user_y");
+    await qualifyForReentry("user_a");
+    await withStore((store) => {
+      const w = store.wallets.find((x) => x.user_id === "user_x")!;
+      w.verified = false;
+      const row = reservedPosition(store.network_positions, "user_a")!;
+      row.recipient_wallet = null;
+      row.recipient_user_id = "user_x";
+    });
+    await expect(resolveReentryPayment("user_a")).rejects.toMatchObject({ code: "GLOBAL_UPLINE_WALLET_UNVERIFIED" });
   });
 });

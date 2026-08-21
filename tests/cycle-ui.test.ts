@@ -45,15 +45,11 @@ describe("logicalCurrentTree", () => {
     const logical = logicalCurrentTree(persisted);
     const left = logical.find((p) => p.id === "e8e1")!;
     const right = logical.find((p) => p.id === "8502")!;
-    const reserved = logical.find((p) => p.status === "RESERVED")!;
     expect(left.parent_id).toBe("root");
     expect(left.position).toBe("LEFT");
     expect(right.parent_id).toBe("root");
     expect(right.position).toBe("RIGHT");
-    expect(reserved.user_id).toBe("uRoot");
-    expect(reserved.parent_id).toBe("e8e1");
-    expect(reserved.position).toBe("LEFT");
-    expect(reserved.source_is_root).toBe(true);
+    expect(logical.filter((p) => p.status === "RESERVED")).toHaveLength(0);
     expect(legacyRecordIds(persisted, logical).has("8502")).toBe(true);
     expect(legacyRecordIds(persisted, logical).has("e8e1")).toBe(false);
   });
@@ -66,5 +62,43 @@ describe("logicalCurrentTree", () => {
     const logical = logicalCurrentTree(persisted);
     expect(logical.filter((p) => p.status === "RESERVED")).toHaveLength(0);
     expect(logical.find((p) => p.id === "left")?.position).toBe("LEFT");
+  });
+
+  it("shows RESERVED only when a real backend reservation exists", () => {
+    const persisted: NetNode[] = [
+      n({ id: "root", user_id: "uRoot", started_at: "t0", user: { referral_code: "GXGLOBAL", display_name: "R", is_demo: false } }),
+      n({
+        id: "e8e1",
+        user_id: "uLeft",
+        parent_id: "root",
+        position: "LEFT",
+        depth: 1,
+        started_at: "t1",
+        user: { referral_code: "GXFOUNDER", display_name: "L", is_demo: false },
+      }),
+      n({
+        id: "8502",
+        user_id: "uRight",
+        parent_id: "root",
+        position: "RIGHT",
+        depth: 1,
+        started_at: "t2",
+        user: { referral_code: "GX8502", display_name: "Rgt", is_demo: false },
+      }),
+      n({
+        id: "rsv",
+        user_id: "uRoot",
+        parent_id: "e8e1",
+        position: "LEFT",
+        depth: 2,
+        status: "RESERVED",
+        from_position_id: "root",
+        user: { referral_code: "GXGLOBAL", display_name: "R", is_demo: false },
+      }),
+    ];
+    const reserved = logicalCurrentTree(persisted).find((p) => p.status === "RESERVED")!;
+    expect(reserved.id).toBe("rsv");
+    expect(reserved.parent_id).toBe("e8e1");
+    expect(reserved.position).toBe("LEFT");
   });
 });

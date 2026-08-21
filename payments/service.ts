@@ -10,7 +10,7 @@ import {
 import { newId, readStore, withStore } from "@/lib/store";
 import { parsePaymentType } from "@/payments/payment-type";
 import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment } from "@/payments/plan-routing";
-import { activateReservedReentry, cycleComplete, currentPosition, reservedPosition } from "@/services/users";
+import { activateReservedReentry, cycleComplete, currentPosition, positionsForPlan, reservedPosition } from "@/services/users";
 import {
   hasConfirmedPlan,
   isPlanUnlocked,
@@ -333,12 +333,12 @@ export async function listUserPlans(userId: string) {
     const reserved = reservedPosition(store.network_positions, userId, plan.id);
     const missing = directs.filter((d) => !hasConfirmedPlan(store.transactions, d.user_id, plan.id));
     const waiting = membership && !pos;
-    const reentryRequired = Boolean(reserved) || Boolean(pos && cycleComplete(store.network_positions, pos.id));
+    const reentryRequired = Boolean(reserved) || Boolean(pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id));
     const global_status = planViewState({
       unlocked,
       membership,
       globalActive: Boolean(pos),
-      reentryRequired: reentryRequired && Boolean(reserved || (pos && cycleComplete(store.network_positions, pos.id))),
+      reentryRequired: reentryRequired && Boolean(reserved || (pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id))),
       waitingForDirects: waiting,
     });
     return {

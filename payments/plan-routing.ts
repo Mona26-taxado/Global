@@ -1,7 +1,16 @@
 import { isAddress } from "viem";
 import { activeChainId, paymentRecipient } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
-import { buyerDirectNumber, currentPosition, DIRECT_REFERRAL_LIMIT_REACHED, placeUser, qualifyForReentry, reservedPosition } from "@/services/users";
+import { cycleComplete } from "@/network/placement";
+import {
+  buyerDirectNumber,
+  currentPosition,
+  DIRECT_REFERRAL_LIMIT_REACHED,
+  placeUser,
+  positionsForPlan,
+  qualifyForReentry,
+  reservedPosition,
+} from "@/services/users";
 import { isPlanUnlocked, qualifiesForPlanGlobal, basePlan } from "@/lib/plan-progress";
 import type { NetworkPositionRow } from "@/types";
 
@@ -237,36 +246,91 @@ export function currentQualifyingPlan(store: { transactions: { user_id: string; 
   return store.plans.find((p) => p.id === best.plan_id || p.code === best.plan_code) ?? null;
 }
 
-export async function resolveReentryPayment(userId: string, planId?: string): Promise<PlanRecipient & { planId: string; planCode: string; amountUsd: number }> {
-  const store0 = await readStore();
-  const inferred = planId ?? reservedPosition(store0.network_positions, userId)?.plan_id ?? currentPosition(store0.network_positions, userId)?.plan_id;
-  const qualified = await qualifyForReentry(userId, inferred);
-  const store = await readStore();
-  const reserved = reservedPosition(store.network_positions, userId, inferred ?? qualified?.plan_id);
-  if (!reserved || reserved.status !== "RESERVED") {
-    throw new PlanRoutingError(
-      "REENTRY_NOT_REQUIRED",
-      qualified?.status === "ACTIVE"
-        ? "This member has not completed both Global legs, so re-entry payment is not required."
-        : "Global re-entry is not available.",
-    );
-  }
-  if (!reserved.parent_id || !reserved.recipient_user_id) {
+/** GLOBAL_REENTRY recipient is always the verified wallet of reserved.parent_id. Never payer, treasury, or registration recipient. */
+export function reentryRecipientFromReserved(
+  store: {
+    network_positions: NetworkPositionRow[];
+    wallets: { user_id: string; address: string; verified: boolean }[];
+  },
+  reserved: NetworkPositionRow,
+): { recipientUserId: string; recipientWallet: `0x${string}` } {
+  if (!reserved.parent_id) {
     throw new PlanRoutingError(
       "GLOBAL_UPLINE_NOT_READY",
       "Re-entry is reserved but the new Global parent is not ready. Pay is blocked. Funds are not held by GLOBAL X.",
     );
   }
-  let wallet = reserved.recipient_wallet;
-  if (!wallet) {
-    wallet = await requireVerifiedWallet(
-      reserved.recipient_user_id,
+  const parentPos = store.network_positions.find((p) => p.id === reserved.parent_id);
+  if (!parentPos) {
+    throw new PlanRoutingError(
+      "GLOBAL_UPLINE_NOT_READY",
+      "Re-entry is reserved but the new Global parent is not ready. Pay is blocked. Funds are not held by GLOBAL X.",
+    );
+  }
+  if (parentPos.user_id === reserved.user_id) {
+    throw new PlanRoutingError(
+      "REENTRY_SELF_PAY",
+      "Re-entry cannot pay the moving member. Recipient must be the new Global parent’s verified wallet.",
+    );
+  }
+  const parentWallet = store.wallets.find((w) => w.user_id === parentPos.user_id && w.verified && isAddress(w.address));
+  if (!parentWallet) {
+    throw new PlanRoutingError(
       "GLOBAL_UPLINE_WALLET_UNVERIFIED",
       "New Global upline wallet is not verified. Re-entry pay is blocked. Funds are not sent to the company as a substitute.",
     );
+  }
+  const wallet = parentWallet.address.toLowerCase() as `0x${string}`;
+  if (reserved.recipient_user_id && reserved.recipient_user_id !== parentPos.user_id) {
+    throw new PlanRoutingError(
+      "REENTRY_RECIPIENT_MISMATCH",
+      "Reserved recipient does not match the new Global parent. Payment is blocked.",
+    );
+  }
+  if (reserved.recipient_wallet && reserved.recipient_wallet.toLowerCase() !== wallet) {
+    throw new PlanRoutingError(
+      "REENTRY_RECIPIENT_MISMATCH",
+      "Reserved recipient does not match the new Global parent. Payment is blocked.",
+    );
+  }
+  return { recipientUserId: parentPos.user_id, recipientWallet: wallet };
+}
+
+export async function resolveReentryPayment(userId: string, planId?: string): Promise<PlanRecipient & { planId: string; planCode: string; amountUsd: number }> {
+  const store0 = await readStore();
+  const inferred = planId ?? reservedPosition(store0.network_positions, userId)?.plan_id ?? currentPosition(store0.network_positions, userId)?.plan_id;
+  let reserved = reservedPosition(store0.network_positions, userId, inferred);
+  if (!reserved) {
+    const current = inferred ? currentPosition(store0.network_positions, userId, inferred) : currentPosition(store0.network_positions, userId);
+    const planForCycle = inferred ?? current?.plan_id;
+    const complete =
+      Boolean(current && planForCycle && cycleComplete(positionsForPlan(store0.network_positions, planForCycle), current.id));
+    if (!complete) {
+      throw new PlanRoutingError(
+        "REENTRY_NOT_REQUIRED",
+        current
+          ? "This member has not completed both Global legs, so re-entry payment is not required."
+          : "Global re-entry is not available.",
+      );
+    }
+    await qualifyForReentry(userId, inferred);
+    reserved = reservedPosition((await readStore()).network_positions, userId, inferred);
+  }
+  const store = await readStore();
+  reserved = reservedPosition(store.network_positions, userId, inferred ?? reserved?.plan_id);
+  if (!reserved || reserved.status !== "RESERVED") {
+    throw new PlanRoutingError(
+      "REENTRY_NOT_REQUIRED",
+      "This member has not completed both Global legs, so re-entry payment is not required.",
+    );
+  }
+  const bound = reentryRecipientFromReserved(store, reserved);
+  if (!reserved.recipient_user_id || !reserved.recipient_wallet) {
     await withStore((s) => {
-      const row = reservedPosition(s.network_positions, userId, reserved.plan_id);
-      if (row && !row.recipient_wallet) row.recipient_wallet = wallet;
+      const row = reservedPosition(s.network_positions, userId, reserved!.plan_id);
+      if (!row) return;
+      if (!row.recipient_user_id) row.recipient_user_id = bound.recipientUserId;
+      if (!row.recipient_wallet) row.recipient_wallet = bound.recipientWallet;
     });
   }
   const plan = store.plans.find((p) => p.id === reserved.plan_id);
@@ -274,12 +338,12 @@ export async function resolveReentryPayment(userId: string, planId?: string): Pr
     throw new PlanRoutingError("NO_QUALIFYING_PLAN", "Re-entry requires the plan of this Global position. Amount is not assumed.");
   }
   return {
-    recipient: wallet as `0x${string}`,
-    recipientUserId: reserved.recipient_user_id,
+    recipient: bound.recipientWallet,
+    recipientUserId: bound.recipientUserId,
     recipientRole: "GLOBAL_REENTRY",
     slot: null,
     directNumber: null,
-    globalParentUserId: reserved.recipient_user_id,
+    globalParentUserId: bound.recipientUserId,
     positionId: reserved.id,
     planId: plan.id,
     planCode: plan.code,
