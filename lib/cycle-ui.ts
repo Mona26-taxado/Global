@@ -163,6 +163,48 @@ export function journeyCounts(steps: JourneyStep[]) {
   };
 }
 
+/** Live admin-tree seats: every ACTIVE + RESERVED row, keyed by position id (same user may appear twice). */
+export function liveApiSeats(tree: NetNode[]): NetNode[] {
+  return tree.filter((n) => {
+    const st = n.status ?? "ACTIVE";
+    return st === "ACTIVE" || st === "RESERVED";
+  });
+}
+
+export type ChildSlots = { left?: NetNode; right?: NetNode };
+
+/** Attach children by parent position id + LEFT/RIGHT. Never unique-by user_id. */
+export function childSlotsByParent(tree: NetNode[]): Map<string, ChildSlots> {
+  const ids = new Set(tree.map((n) => n.id));
+  const byParent = new Map<string, ChildSlots>();
+  for (const n of tree) {
+    if (!n.parent_id || !ids.has(n.parent_id)) continue;
+    const slot = byParent.get(n.parent_id) ?? {};
+    if (n.position === "LEFT") {
+      if (!slot.left) slot.left = n;
+    } else if (n.position === "RIGHT") {
+      if (!slot.right) slot.right = n;
+    }
+    byParent.set(n.parent_id, slot);
+  }
+  return byParent;
+}
+
+/** Roots plus any live seat that did not attach as a LEFT/RIGHT child (must still render). */
+export function liveForestRoots(tree: NetNode[]): NetNode[] {
+  const ids = new Set(tree.map((n) => n.id));
+  const attached = new Set<string>();
+  for (const slot of childSlotsByParent(tree).values()) {
+    if (slot.left) attached.add(slot.left.id);
+    if (slot.right) attached.add(slot.right.id);
+  }
+  return tree
+    .filter((n) => !n.parent_id || !ids.has(n.parent_id) || !attached.has(n.id))
+    .sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
+}
+
+
+
 export const GHOST_W = 92;
 export const GHOST_H = 72;
 const GHOST_GAP = 48;

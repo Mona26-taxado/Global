@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionJourney, journeyCounts, layoutGhostHistory, routingLabel, type JourneyPosition } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, journeyCounts, layoutGhostHistory, liveApiSeats, liveForestRoots, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -99,5 +99,27 @@ describe("buildPositionJourney", () => {
     expect(spots[0]?.x).toBeLessThan(spots[1]!.x);
     expect(spots[1]?.x).toBeLessThan(400);
   });
+
+  it("renders ROOT ACTIVE and ROOT RESERVED as two seats when they have different position ids", () => {
+    const tree: NetNode[] = [
+      { id: "pos-root-active", user_id: "root", parent_id: null, position: null, depth: 0, status: "ACTIVE" },
+      { id: "pos-e8e1", user_id: "e8e1", parent_id: "pos-root-active", position: "LEFT", depth: 1, status: "ACTIVE" },
+      { id: "pos-99ab", user_id: "99ab", parent_id: "pos-root-active", position: "RIGHT", depth: 1, status: "ACTIVE" },
+      { id: "pos-root-rsv", user_id: "root", parent_id: "pos-e8e1", position: "LEFT", depth: 2, status: "RESERVED" },
+    ];
+    const live = liveApiSeats(tree);
+    expect(live).toHaveLength(4);
+    expect(new Set(live.map((n) => n.id)).size).toBe(4);
+    expect(live.filter((n) => n.user_id === "root")).toHaveLength(2);
+    const roots = liveForestRoots(live);
+    expect(roots.map((r) => r.id)).toEqual(["pos-root-active"]);
+    const kids = childSlotsByParent(live);
+    expect(kids.get("pos-root-active")?.left?.id).toBe("pos-e8e1");
+    expect(kids.get("pos-root-active")?.right?.id).toBe("pos-99ab");
+    expect(kids.get("pos-e8e1")?.left?.id).toBe("pos-root-rsv");
+    expect(kids.get("pos-e8e1")?.left?.status).toBe("RESERVED");
+  });
 });
+
+
 

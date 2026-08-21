@@ -17,7 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { buildPositionJourney, GHOST_H, GHOST_W, journeyCounts, layoutGhostHistory, parentOf, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, GHOST_H, GHOST_W, journeyCounts, layoutGhostHistory, liveApiSeats, liveForestRoots, parentOf, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -91,32 +91,22 @@ function initials(code?: string) {
   return c.slice(0, 2).toUpperCase();
 }
 
-function buildChildMap(tree: NetNode[]) {
-  const byParent = new Map<string, { left?: NetNode; right?: NetNode }>();
-  for (const n of tree) {
-    if (!n.parent_id) continue;
-    const slot = byParent.get(n.parent_id) ?? {};
-    if (n.position === "LEFT") slot.left = n;
-    else if (n.position === "RIGHT") slot.right = n;
-    byParent.set(n.parent_id, slot);
-  }
-  return byParent;
-}
-
-function toVis(node: NetNode, byParent: Map<string, { left?: NetNode; right?: NetNode }>, depth: number, maxDepth: number): VisNode {
+function toVis(node: NetNode, byParent: Map<string, { left?: NetNode; right?: NetNode }>, depth: number, maxDepth: number, visited: Set<string>): VisNode {
   const vis: VisNode = {
     key: node.id,
     kind: "member",
     position: node.position === "RIGHT" ? "RIGHT" : node.position === "LEFT" ? "LEFT" : null,
     node,
   };
+  if (visited.has(node.id)) return vis;
+  visited.add(node.id);
   if (maxDepth !== Infinity && depth >= maxDepth) return vis;
   const kids = byParent.get(node.id) ?? {};
   vis.left = kids.left
-    ? toVis(kids.left, byParent, depth + 1, maxDepth)
+    ? toVis(kids.left, byParent, depth + 1, maxDepth, visited)
     : { key: `${node.id}-empty-L`, kind: "empty", position: "LEFT" };
   vis.right = kids.right
-    ? toVis(kids.right, byParent, depth + 1, maxDepth)
+    ? toVis(kids.right, byParent, depth + 1, maxDepth, visited)
     : { key: `${node.id}-empty-R`, kind: "empty", position: "RIGHT" };
   return vis;
 }
@@ -184,12 +174,14 @@ function MemberCard({
   user,
   planId,
   onSelect,
+  showAsRoot,
 }: {
   placed: Placed;
   selected: boolean;
   user?: CycleUser;
   planId?: string;
   onSelect: () => void;
+  showAsRoot?: boolean;
 }) {
   if (placed.vis.kind === "empty") {
     return (
@@ -205,10 +197,10 @@ function MemberCard({
   }
   const node = placed.vis.node!;
   const reserved = statusOf(node) === "RESERVED";
-  const isRoot = !node.parent_id && !reserved;
+  const isRoot = (!node.parent_id && !reserved) || Boolean(showAsRoot && reserved);
   const code = node.user?.referral_code ?? shortAddr(node.user_id);
   const tail = walletTail(user?.wallet);
-  const label = reserved ? code : isRoot ? "ROOT" : tail ?? code;
+  const label = isRoot ? "ROOT" : reserved ? code : tail ?? code;
   const st = statusOf(node);
   const plan = planLabel(planId) ?? planLabel(user?.current_plan);
   return (
@@ -231,7 +223,12 @@ function MemberCard({
         </span>
         <div className="min-w-0">
           <p className="truncate font-mono text-[12px] font-semibold tracking-wide text-cream">{label}</p>
-          {reserved && <p className="text-[10px] font-semibold uppercase tracking-wide text-warning">Reserved</p>}
+          {reserved && (
+            <>
+              <p className="truncate text-[10px] text-secondary">{code}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-warning">Reserved</p>
+            </>
+          )}
         </div>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-1">
@@ -303,16 +300,18 @@ export function GlobalNetworkTree({
     return m;
   }, [wallets, users, userById]);
 
-  const liveTree = useMemo(() => tree.filter((n) => !n.user?.is_demo), [tree]);
+  const liveTree = useMemo(() => liveApiSeats(tree), [tree]);
+  const activeRootUserIds = useMemo(
+    () => new Set(liveTree.filter((n) => !n.parent_id && (n.status ?? "ACTIVE") === "ACTIVE").map((n) => n.user_id)),
+    [liveTree],
+  );
   const maxDepth = levels === "all" ? Infinity : levels;
-  const roots = useMemo(() => {
-    const ids = new Set(liveTree.map((n) => n.id));
-    return liveTree.filter((n) => !n.parent_id || !ids.has(n.parent_id)).sort((a, b) => a.depth - b.depth);
-  }, [liveTree]);
+  const roots = useMemo(() => liveForestRoots(liveTree), [liveTree]);
 
   const visRoots = useMemo(() => {
-    const byParent = buildChildMap(liveTree);
-    return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1));
+    const byParent = childSlotsByParent(liveTree);
+    const visited = new Set<string>();
+    return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
   }, [liveTree, roots, maxDepth]);
 
   const placed = useMemo(() => {
@@ -855,12 +854,13 @@ export function GlobalNetworkTree({
                       </svg>
                       {placed.map((p) => (
                         <MemberCard
-                          key={p.vis.key}
+                          key={p.vis.node?.id ?? p.vis.key}
                           placed={{ ...p, x: p.x + ghostShiftX }}
                           selected={p.vis.node?.id === selectedId}
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
                           planId={planId}
+                          showAsRoot={Boolean(p.vis.node && activeRootUserIds.has(p.vis.node.user_id))}
                         />
                       ))}
                       {showJourney &&
