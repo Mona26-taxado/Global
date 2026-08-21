@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionJourney, childSlotsByParent, journeyCounts, liveApiSeats, liveForestRoots, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, journeyCounts, layoutPreviousChains, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -104,6 +104,37 @@ describe("buildPositionJourney", () => {
     expect(kids.get("pos-root-active")?.right?.id).toBe("pos-99ab");
     expect(kids.get("pos-e8e1")?.left?.id).toBe("pos-root-rsv");
     expect(kids.get("pos-e8e1")?.left?.status).toBe("RESERVED");
+  });
+
+  it("walks stored HISTORY via from_position_id and does not invent missing seats", () => {
+    const live: NetNode = {
+      id: "pos_4984565872461102",
+      user_id: "user_6ed8e4893670db32",
+      parent_id: "pos_938a4b2c3b7e5eb6",
+      position: "LEFT",
+      depth: 2,
+      status: "ACTIVE",
+      from_position_id: "pos_user_6ed8e4893670db32",
+    };
+    const rows: JourneyPosition[] = [
+      { id: "pos_user_6ed8e4893670db32", parent_id: null, position: null, status: "HISTORY", started_at: "t0", ended_at: "t1" },
+      { id: live.id, parent_id: "pos_938a4b2c3b7e5eb6", position: "LEFT", status: "ACTIVE", from_position_id: "pos_user_6ed8e4893670db32" },
+    ];
+    const chain = previousHistoryChain(live, rows);
+    expect(chain).toHaveLength(1);
+    expect(chain[0]?.id).toBe("pos_user_6ed8e4893670db32");
+    expect(chain[0]?.parent_id).toBeNull();
+    expect(previousHistoryChain(live, [])).toEqual([]);
+    const liveTree = liveApiSeats([
+      { id: "pos_938a4b2c3b7e5eb6", user_id: "e8e1", parent_id: "pos_user_6ed8e4893670db32", position: "LEFT", depth: 1, status: "ACTIVE" },
+      live,
+    ]);
+    expect(liveTree.every((n) => (n.status ?? "ACTIVE") !== "HISTORY")).toBe(true);
+    expect(childSlotsByParent(liveTree).get("pos_938a4b2c3b7e5eb6")?.left?.id).toBe(live.id);
+    const spots = layoutPreviousChains([{ liveId: live.id, x: 400, y: 200, chain }]);
+    expect(spots).toHaveLength(1);
+    expect(spots[0]?.x).toBeLessThan(400);
+    expect(spots[0]?.targetLiveId).toBe(live.id);
   });
 });
 

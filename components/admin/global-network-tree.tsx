@@ -17,7 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
-import { buildPositionJourney, childSlotsByParent, journeyCounts, liveApiSeats, liveForestRoots, parentOf, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, GHOST_H, GHOST_W, journeyCounts, layoutPreviousChains, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
 
@@ -275,7 +275,7 @@ export function GlobalNetworkTree({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [legend, setLegend] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyRows, setHistoryRows] = useState<JourneyPosition[]>([]);
+  const [historyByUser, setHistoryByUser] = useState<Map<string, JourneyPosition[]>>(new Map());
   const [searchNote, setSearchNote] = useState("");
   const [searchStats, setSearchStats] = useState<{
     previous: number;
@@ -330,26 +330,41 @@ export function GlobalNetworkTree({
   const selectedNode = liveTree.find((n) => n.id === selectedId) ?? null;
   const selectedUser = selectedNode ? userById.get(selectedNode.user_id) : undefined;
   const globalParent = parentOf(liveTree, selectedNode ?? undefined);
+  const historyRows = selectedNode ? (historyByUser.get(selectedNode.user_id) ?? []) : [];
+  const movedUserKey = useMemo(
+    () =>
+      [...new Set(liveTree.filter((n) => n.from_position_id).map((n) => n.user_id))].sort().join(","),
+    [liveTree],
+  );
 
   useEffect(() => {
-    if (!selectedNode) {
-      setHistoryRows([]);
+    if (!movedUserKey) {
+      setHistoryByUser(new Map());
       return;
     }
+    const ids = movedUserKey.split(",");
     let cancelled = false;
-    api<{
-      ok: boolean;
-      positions?: JourneyPosition[];
-    }>(`/api/admin/data?resource=user&id=${encodeURIComponent(selectedNode.user_id)}`).then((r) => {
-      if (!cancelled) {
-        const rows = r.ok ? (r.positions ?? []) : [];
-        setHistoryRows(planId ? rows.filter((p) => !p.plan_id || p.plan_id === planId) : rows);
+    void Promise.all(
+      ids.map((id) =>
+        api<{ ok: boolean; positions?: JourneyPosition[] }>(`/api/admin/data?resource=user&id=${encodeURIComponent(id)}`).then(
+          (r) => [id, r.ok ? (r.positions ?? []) : []] as const,
+        ),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      const next = new Map<string, JourneyPosition[]>();
+      for (const [id, rows] of entries) {
+        next.set(
+          id,
+          planId ? rows.filter((p) => !p.plan_id || p.plan_id === planId) : rows,
+        );
       }
+      setHistoryByUser(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [selectedNode?.user_id, planId]);
+  }, [movedUserKey, planId]);
 
   function selectNode(node: NetNode, fromSearch = false) {
     setSelectedId(node.id);
@@ -437,6 +452,28 @@ export function GlobalNetworkTree({
   );
   const counts = journeyCounts(journey);
   const previousHistory = [...historyRows].filter((p) => p.status === "HISTORY").sort((a, b) => String(a.started_at ?? "").localeCompare(String(b.started_at ?? ""))).at(-1);
+  const ghostSpots = useMemo(() => {
+    return layoutPreviousChains(
+      placed.flatMap((p) => {
+        const node = p.vis.node;
+        if (!node) return [];
+        const chain = previousHistoryChain(node, historyByUser.get(node.user_id) ?? []);
+        if (!chain.length) return [];
+        return [{ liveId: node.id, x: p.x, y: p.y, chain }];
+      }),
+    );
+  }, [placed, historyByUser]);
+  const ghostShiftX = useMemo(() => {
+    if (!ghostSpots.length) return 0;
+    const minX = Math.min(...ghostSpots.map((g) => g.x - GHOST_W / 2));
+    return minX < 16 ? 16 - minX : 0;
+  }, [ghostSpots]);
+  const drawW = Math.max(
+    canvasW + ghostShiftX,
+    ...ghostSpots.map((g) => g.x + ghostShiftX + GHOST_W / 2 + 16),
+    ...placed.map((p) => p.x + ghostShiftX + NODE_W),
+  );
+  const drawH = Math.max(canvasH, ...ghostSpots.map((g) => g.y + GHOST_H + 16));
 
   useEffect(() => {
     if (!searchNote || !selectedNode) return;
@@ -555,6 +592,54 @@ export function GlobalNetworkTree({
             {rightChild ? (statusOf(rightChild) === "RESERVED" ? "RESERVED" : walletTail(userById.get(rightChild.user_id)?.wallet) ?? rightChild.user?.referral_code) : "Empty"}
           </p>
         </section>
+        {selectedNode.from_position_id && (
+          <section>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Previous position</p>
+            <p className="mt-2 text-secondary">Previous position</p>
+            <p className="text-cream">
+              {previousHistory
+                ? `${previousHistory.parent_id ? previousHistory.position ?? "—" : "ROOT"} · HISTORY`
+                : selectedNode.from_position_id}
+            </p>
+            <p className="mt-2 text-secondary">Previous parent</p>
+            <p className="text-cream">{previousHistory ? previousHistory.parent_code ?? (previousHistory.parent_id ? "—" : "Root") : "—"}</p>
+            <p className="mt-2 text-secondary">Previous leg</p>
+            <p className="text-cream">{previousHistory?.position ?? (previousHistory && !previousHistory.parent_id ? "ROOT" : "—")}</p>
+            <p className="mt-2 text-secondary">Re-entry date</p>
+            <p className="text-cream">
+              {selectedNode.started_at
+                ? new Date(selectedNode.started_at).toLocaleString()
+                : previousHistory?.ended_at
+                  ? new Date(previousHistory.ended_at).toLocaleString()
+                  : "—"}
+            </p>
+            <p className="mt-2 text-secondary">Re-entry recipient</p>
+            <p className="font-mono text-xs text-cream">
+              {selectedNode.recipient_wallet
+                ? shortAddr(selectedNode.recipient_wallet)
+                : selectedNode.recipient_user_id
+                  ? userById.get(selectedNode.recipient_user_id)?.referral_code ?? shortAddr(selectedNode.recipient_user_id)
+                  : "—"}
+            </p>
+            <p className="mt-2 text-secondary">Plan amount</p>
+            <p className="text-cream">{planLabel(planId) ?? planLabel(selectedUser?.current_plan) ?? "—"}</p>
+            <p className="mt-2 text-secondary">Tx hash</p>
+            {selectedNode.reentry_tx_hash ? (
+              <a className="inline-flex items-center gap-1 font-mono text-[11px] text-electric no-underline" href={explorerTxUrl(selectedNode.reentry_tx_hash)} target="_blank" rel="noreferrer">
+                {shortAddr(selectedNode.reentry_tx_hash)}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ) : (
+              <p className="text-cream">—</p>
+            )}
+            <p className="mt-2 text-secondary">Current parent</p>
+            <p className="text-cream">
+              {globalParent ? walletTail(userById.get(globalParent.user_id)?.wallet) ?? globalParent.user?.referral_code : selectedNode.parent_id ? "—" : "Root"}
+            </p>
+            <p className="mt-2 text-secondary">Current status</p>
+            <StatusBadge status={statusOf(selectedNode)} />
+          </section>
+        )}
         {reservedSelected && (
           <section>
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mute">Re-entry (this seat)</p>
@@ -762,8 +847,8 @@ export function GlobalNetworkTree({
                     <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} />
                   </div>
                   <TransformComponent wrapperClass="!w-full !h-[560px] lg:!h-[640px]" contentClass="p-8">
-                    <div className="relative" style={{ width: canvasW, height: canvasH }}>
-                      <svg className="absolute inset-0" width={canvasW} height={canvasH}>
+                    <div className="relative" style={{ width: drawW, height: drawH }}>
+                      <svg className="absolute inset-0" width={drawW} height={drawH}>
                         {placed.map((p) => {
                           if (p.vis.kind !== "member" || !p.vis.node) return null;
                           const kids = placed.filter((c) => {
@@ -771,9 +856,9 @@ export function GlobalNetworkTree({
                             return c.vis.key.startsWith(`${p.vis.node?.id}-empty`);
                           });
                           return kids.map((c) => {
-                            const x1 = p.x;
+                            const x1 = p.x + ghostShiftX;
                             const y1 = p.y + NODE_H;
-                            const x2 = c.x;
+                            const x2 = c.x + ghostShiftX;
                             const y2 = c.y;
                             const midY = (y1 + y2) / 2;
                             const isRight = c.vis.position === "RIGHT";
@@ -796,17 +881,64 @@ export function GlobalNetworkTree({
                             );
                           });
                         })}
+                        {ghostSpots.map((g, i) => {
+                          const chain = ghostSpots.filter((s) => s.targetLiveId === g.targetLiveId);
+                          const idx = chain.findIndex((s) => s.id === g.id);
+                          const next = chain[idx + 1];
+                          const live = placed.find((p) => p.vis.node?.id === g.targetLiveId);
+                          const fromX = g.x + ghostShiftX;
+                          const fromY = g.y + GHOST_H / 2;
+                          const toX = next ? next.x + ghostShiftX : live ? live.x + ghostShiftX - NODE_W / 2 : fromX;
+                          const toY = next ? next.y + GHOST_H / 2 : live ? live.y + NODE_H / 2 : fromY;
+                          return (
+                            <g key={`ghost-line-${g.id}-${i}`}>
+                              <path
+                                d={`M ${fromX + GHOST_W / 2} ${fromY} L ${toX} ${toY}`}
+                                fill="none"
+                                stroke="rgba(154,168,199,0.55)"
+                                strokeWidth="2"
+                                strokeDasharray="5 5"
+                                markerEnd="url(#gx-ghost-arrow)"
+                              />
+                            </g>
+                          );
+                        })}
+                        <defs>
+                          <marker id="gx-ghost-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(154,168,199,0.7)" />
+                          </marker>
+                        </defs>
                       </svg>
                       {placed.map((p) => (
                         <MemberCard
                           key={p.vis.node?.id ?? p.vis.key}
-                          placed={p}
+                          placed={{ ...p, x: p.x + ghostShiftX }}
                           selected={p.vis.node?.id === selectedId}
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
                           planId={planId}
                           showAsRoot={Boolean(p.vis.node && activeRootUserIds.has(p.vis.node.user_id))}
                         />
+                      ))}
+                      {ghostSpots.map((g) => (
+                        <div
+                          key={`ghost-${g.id}`}
+                          className="pointer-events-none absolute rounded-[12px] border border-dashed border-mute/45 bg-[#0B1220]/55 px-2 py-1.5 opacity-80"
+                          style={{
+                            left: g.x + ghostShiftX - GHOST_W / 2,
+                            top: g.y,
+                            width: GHOST_W,
+                            height: GHOST_H,
+                          }}
+                        >
+                          <p className="text-[8px] font-bold uppercase tracking-wide text-mute">
+                            {g.row.parent_id ? "History" : "Previous"}
+                          </p>
+                          <p className="mt-0.5 truncate text-[11px] text-cream/80">
+                            {g.row.parent_id ? g.row.parent_code ?? "—" : "ROOT"}
+                          </p>
+                          <p className="text-[9px] text-mute">{g.row.position ?? "ROOT"} · HISTORY</p>
+                        </div>
                       ))}
                     </div>
                   </TransformComponent>
@@ -827,6 +959,9 @@ export function GlobalNetworkTree({
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-4 border border-dashed border-warning" /> RESERVED
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-0.5 w-5 border-t border-dashed border-mute" /> Previous / HISTORY
                 </span>
               </div>
             )}

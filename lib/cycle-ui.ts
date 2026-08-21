@@ -203,3 +203,57 @@ export function liveForestRoots(tree: NetNode[]): NetNode[] {
     .sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
 }
 
+/** HISTORY seats behind a live node, oldest first. Uses stored from_position_id only — never invents rows. */
+export function previousHistoryChain(
+  live: Pick<NetNode, "id" | "from_position_id">,
+  rows: JourneyPosition[],
+): JourneyPosition[] {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const walked: JourneyPosition[] = [];
+  const seen = new Set<string>();
+  let id: string | null | undefined = live.from_position_id;
+  while (id && !seen.has(id) && id !== live.id) {
+    seen.add(id);
+    const row = byId.get(id);
+    if (!row) break;
+    if ((row.status ?? "ACTIVE") !== "HISTORY") break;
+    walked.push(row);
+    id = row.from_position_id;
+  }
+  return walked.reverse();
+}
+
+export const GHOST_W = 92;
+export const GHOST_H = 72;
+const GHOST_GAP = 48;
+
+export type GhostHistorySpot = {
+  id: string;
+  index: number;
+  x: number;
+  y: number;
+  row: JourneyPosition;
+  targetLiveId: string;
+};
+
+/** Display-only HISTORY cards to the left of a live seat. Does not occupy LEFT/RIGHT. */
+export function layoutPreviousChains(
+  items: { liveId: string; x: number; y: number; chain: JourneyPosition[] }[],
+): GhostHistorySpot[] {
+  const spots: GhostHistorySpot[] = [];
+  for (const item of items) {
+    const n = item.chain.length;
+    item.chain.forEach((row, i) => {
+      spots.push({
+        id: `${item.liveId}:${row.id}`,
+        index: i + 1,
+        row,
+        targetLiveId: item.liveId,
+        x: item.x - (n - i) * (GHOST_W + GHOST_GAP),
+        y: row.parent_id ? item.y + 20 : Math.max(12, item.y - 8),
+      });
+    });
+  }
+  return spots;
+}
+
