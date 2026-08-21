@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, matchesWalletOrCode, previousHistoryChain, routingLabel, searchTreePositions, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -148,29 +148,6 @@ describe("buildPositionJourney", () => {
     expect(kids.get("pos_user_6ed8e4893670db32")?.left?.id).toBe("pos_938a4b2c3b7e5eb6");
     expect(kids.get("pos_user_6ed8e4893670db32")?.right?.id).toBe("pos_a9e48adb3b386daa");
     expect(kids.get("pos_938a4b2c3b7e5eb6")?.left?.id).toBe(live.id);
-  });
-});
-
-describe("tree search", () => {
-  const wallet = "0xd77ec55eb56ace50456515f018b82a6de187e8e1";
-  const users = [{ id: "u1", referral_code: "GXGLOBAL", display_name: "G", wallet }];
-  const tree: NetNode[] = [
-    { id: "pos_active", user_id: "u1", parent_id: null, position: null, depth: 0, status: "ACTIVE", user: { referral_code: "GXGLOBAL", display_name: "G", is_demo: false } },
-    { id: "pos_reserved", user_id: "u1", parent_id: "pos_other", position: "LEFT", depth: 1, status: "RESERVED", user: { referral_code: "GXGLOBAL", display_name: "G", is_demo: false } },
-  ];
-
-  it("matches full wallet, partial wallet, tail, and referral code", () => {
-    expect(matchesWalletOrCode(wallet, users[0]!)).toBe(true);
-    expect(matchesWalletOrCode("0xd77e", users[0]!)).toBe(true);
-    expect(matchesWalletOrCode("e8e1", users[0]!)).toBe(true);
-    expect(matchesWalletOrCode("GXGLOBAL", users[0]!)).toBe(true);
-    expect(matchesWalletOrCode("GXFOUNDER", users[0]!)).toBe(false);
-  });
-
-  it("returns every matching position id without collapsing by user", () => {
-    const hits = searchTreePositions("GXGLOBAL", tree, users);
-    expect(hits.map((h) => h.id).sort()).toEqual(["pos_active", "pos_reserved"]);
-    expect(searchTreePositions("e8e1", tree, users)).toHaveLength(2);
   });
 });
 

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GitBranch, Users } from "lucide-react";
+import { ArrowLeftRight, Clock3, GitBranch, Users, Wallet } from "lucide-react";
 import { AdminShell } from "@/components/admin-shell";
-import { AdminKpi } from "@/components/ui/app-ui";
+import { Card } from "@/components/ui/card";
+import { formatTokenAmount } from "@/components/ui/data-list";
 import { api } from "@/lib/utils";
 import type { NetNode } from "@/lib/cycle-ui";
 import {
@@ -62,21 +63,43 @@ export default function AdminCyclePage() {
     () => tree.filter((n) => !n.user?.is_demo && (n.status ?? "ACTIVE") === "ACTIVE"),
     [tree],
   );
-  const reservedSeats = useMemo(() => tree.filter((n) => n.status === "RESERVED"), [tree]);
+  const left = activeSeats.filter((n) => n.position === "LEFT").length;
+  const right = activeSeats.filter((n) => n.position === "RIGHT").length;
+  const planConfirmed = useMemo(
+    () => txs.filter((t) => (t.payment_type === "PLAN_PURCHASE" || t.payment_type === "GLOBAL_REENTRY") && t.status === "CONFIRMED"),
+    [txs],
+  );
+  const volume = useMemo(
+    () => planConfirmed.reduce((sum, t) => sum + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0),
+    [planConfirmed],
+  );
+  const pending = useMemo(() => txs.filter((t) => t.status === "PENDING"), [txs]);
+  const pendingAmt = useMemo(
+    () => pending.reduce((sum, t) => sum + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0),
+    [pending],
+  );
+
   const kpis = [
-    { label: "Active Seats", value: String(activeSeats.length), icon: GitBranch },
-    { label: "Reserved Seats", value: String(reservedSeats.length), icon: GitBranch },
-    { label: "Total Members", value: String(users.length), icon: Users },
+    { label: "Total Members", value: String(users.length), hint: "Registered members", icon: Users },
+    { label: "Active Positions", value: String(activeSeats.length), hint: users.length ? `${((activeSeats.length / Math.max(users.length, 1)) * 100).toFixed(1)}% of members` : "In Global tree", icon: GitBranch },
+    { label: "Left Leg", value: String(left), hint: activeSeats.length ? `${((left / Math.max(activeSeats.length, 1)) * 100).toFixed(1)}%` : undefined, icon: ArrowLeftRight },
+    { label: "Right Leg", value: String(right), hint: activeSeats.length ? `${((right / Math.max(activeSeats.length, 1)) * 100).toFixed(1)}%` : undefined, icon: ArrowLeftRight },
+    { label: "Total Volume", value: formatTokenAmount(volume), hint: "Confirmed plan / re-entry", icon: Wallet },
+    { label: "Pending Payments", value: String(pending.length), hint: pending.length ? formatTokenAmount(pendingAmt) : "None pending", icon: Clock3 },
   ];
 
   return (
-    <AdminShell
-      title="Global Network Tree"
-      description="First-empty Global placement (top to bottom, LEFT then RIGHT). Sponsor is shown in node details, not as a tree edge."
-    >
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <AdminShell title="Global Network Tree">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {kpis.map((k) => (
-          <AdminKpi key={k.label} label={k.label} value={k.value} icon={k.icon} />
+          <Card key={k.label} className="border-line bg-[#0D1424] p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-mute">{k.label}</p>
+              <k.icon className="h-3.5 w-3.5 text-violet/80" />
+            </div>
+            <p className="mt-2 font-display text-2xl tabular text-cream">{k.value}</p>
+            {k.hint && <p className="mt-1 text-[11px] text-mute">{k.hint}</p>}
+          </Card>
         ))}
       </div>
 
@@ -104,8 +127,6 @@ export default function AdminCyclePage() {
           error={error}
           onRetry={load}
           planId={planId}
-          plans={planRows}
-          onPlanId={setPlanId}
         />
       </div>
     </AdminShell>

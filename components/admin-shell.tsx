@@ -104,14 +104,14 @@ export function AdminShell({
       </span>
       <span>
         <span className="block font-display text-[11px] tracking-[0.22em] text-cream">GLOBAL X</span>
-        <span className="block text-[11px] text-mute">Admin Console</span>
+        <span className="block text-[11px] text-mute">Admin console</span>
       </span>
     </Link>
   );
 
   return (
     <div className="min-h-screen lg:flex">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[260px] flex-col overflow-hidden border-r border-line bg-[#070b16] px-4 py-5 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[260px] flex-col overflow-hidden border-r border-line bg-surface px-4 py-5 lg:flex">
         {brand}
         <div className="mt-8 min-h-0 flex-1 overflow-y-auto pr-1">
           <NavLinks pathname={pathname} />
@@ -124,12 +124,8 @@ export function AdminShell({
           <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3 lg:hidden">{brand}</div>
             <div className="hidden min-w-0 lg:block">
-              <p className="text-[11px] text-mute">
-                <span className="uppercase tracking-[0.18em]">{NAV.find((n) => n.href === pathname)?.group ?? "Admin"}</span>
-                <span className="mx-1.5 text-mute">/</span>
-                <span>{title}</span>
-              </p>
-              <h1 className="truncate font-display text-[28px] leading-8 text-cream">{title}</h1>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Control center</p>
+              <h1 className="truncate font-display text-[22px] leading-7 text-cream">{title}</h1>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -175,10 +171,8 @@ export function AdminShell({
 
         <section className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="lg:hidden">
-            <p className="text-[11px] text-mute">
-              {NAV.find((n) => n.href === pathname)?.group ?? "Admin"} / {title}
-            </p>
-            <h1 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">{title}</h1>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Control center</p>
+            <h1 className="mt-1 font-display text-[30px] leading-9 text-cream">{title}</h1>
           </div>
           {description && <p className="mt-2 max-w-2xl text-sm text-secondary lg:mt-0">{description}</p>}
           <div className="mt-6">{children}</div>

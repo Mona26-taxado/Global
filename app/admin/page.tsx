@@ -17,7 +17,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { AdminShell } from "@/components/admin-shell";
-import { AdminKpi, StatusBadge } from "@/components/ui/app-ui";
+import { StatusBadge } from "@/components/ui/app-ui";
 import { fieldClass, formatTokenAmount, Meter, BarChart, StatusBars } from "@/components/ui/data-list";
 import { friendlyMessage } from "@/lib/user-errors";
 
@@ -170,7 +170,13 @@ export default function AdminPage() {
           ] as const
         ).map(({ label, value, href, icon: Icon }) => (
             <Link key={label} href={href} className="no-underline">
-              <AdminKpi label={label} value={value ?? "—"} icon={Icon} />
+              <Card className="flex items-center gap-3 p-4 transition hover:border-violet/40">
+                <Icon className="h-4 w-4 text-violet" />
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-mute">{label}</p>
+                  <p className="font-display text-xl tabular">{value ?? "—"}</p>
+                </div>
+              </Card>
             </Link>
         ))}
       </div>

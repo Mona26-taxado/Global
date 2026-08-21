@@ -164,43 +164,6 @@ export function journeyCounts(steps: JourneyStep[]) {
   };
 }
 
-export function matchesWalletOrCode(
-  needle: string,
-  user: { referral_code?: string | null; display_name?: string | null; id?: string | null; wallet?: string | null },
-) {
-  const n = needle.trim().toLowerCase();
-  if (!n) return false;
-  if ((user.referral_code ?? "").toLowerCase().includes(n)) return true;
-  if ((user.display_name ?? "").toLowerCase().includes(n)) return true;
-  if ((user.id ?? "").toLowerCase().includes(n)) return true;
-  const w = (user.wallet ?? "").toLowerCase();
-  if (w && (w.includes(n) || w.replace(/^0x/, "").includes(n.replace(/^0x/, "")))) return true;
-  return false;
-}
-
-/** All matching seats by position id — never unique-by user_id. */
-export function searchTreePositions(
-  needle: string,
-  tree: NetNode[],
-  users: { id: string; referral_code?: string; display_name?: string; wallet?: string | null }[],
-): NetNode[] {
-  const n = needle.trim().toLowerCase();
-  if (!n) return [];
-  const ids = new Set(users.filter((u) => matchesWalletOrCode(n, u)).map((u) => u.id));
-  const seen = new Set<string>();
-  const out: NetNode[] = [];
-  for (const p of tree) {
-    if (seen.has(p.id)) continue;
-    const hit =
-      ids.has(p.user_id) ||
-      matchesWalletOrCode(n, { id: p.user_id, referral_code: p.user?.referral_code, display_name: p.user?.display_name });
-    if (!hit) continue;
-    seen.add(p.id);
-    out.push(p);
-  }
-  return out;
-}
-
 /** Live admin-tree seats: every ACTIVE + RESERVED row, keyed by position id (same user may appear twice). */
 export function liveApiSeats(tree: NetNode[]): NetNode[] {
   return tree.filter((n) => {
