@@ -12,4 +12,5 @@ alwaysApply: true
 - Occupancy and cycle: **ACTIVE only**. Legacy RESERVED / HISTORY / pending intents do not occupy. Cycle = immediate ACTIVE LEFT and ACTIVE RIGHT.
 - Failed / cancelled / unpaid Direct #2 → expire the intent; tree unchanged; **no new ACTIVE**.
 - Identical PREPARE/CONFIRM/occupancy/cycle for PLAN_100 / PLAN_200 / PLAN_500 / PLAN_1000 and every future admin-created plan. No base-plan bypass, no amount-specific tree behavior.
-- Do not rewrite confirmed txs, referrals, $5 registration, plan unlock order, first-empty BFS, or Mainnet settings.
+- First-empty: ROOT-level leg-first only (not whole-tree BFS). ROOT.LEFT, then that member’s immediate ACTIVE LEFT+RIGHT, then ROOT.RIGHT. One-time unlock after that first-leg cycleComplete; do not relock if the old left-head re-enters. Not recursive. Same engine for every plan_id (including re-entry).
+- Do not rewrite confirmed txs, referrals, $5 registration, plan unlock order, or Mainnet settings.

@@ -145,8 +145,8 @@ export const DEFAULT_PLANS = [
 export const DEFAULT_GLOBAL_CONFIG = {
   qualification_rule: "Direct #2 of a member with this plan ACTIVE places that member in Global.",
   global_entry_condition: "Enter Global on Direct #2. Direct #1 pays the sponsor; Direct #2 pays the new Global parent.",
-  two_branch_cycle: "Each Global position has LEFT and RIGHT. Level order fills LEFT then RIGHT.",
-  placement_rule: "First empty Global seat, top to bottom, LEFT then RIGHT. Each position has at most LEFT and RIGHT. Paid re-entry uses the same allocator.",
+  two_branch_cycle: "Each Global position has LEFT and RIGHT. ROOT fills LEFT first, then that member’s immediate LEFT and RIGHT, then ROOT.RIGHT stays unlocked. Other parents fill LEFT then RIGHT.",
+  placement_rule: "ROOT.LEFT first. Fill that member’s immediate ACTIVE LEFT and RIGHT, then unlock ROOT.RIGHT once for this plan tree (do not relock if the old left-head re-enters). Other parents fill LEFT then RIGHT. Paid re-entry uses the same allocator.",
   cycle_completion: "A Global cycle completes when the current seat has ACTIVE LEFT and ACTIVE RIGHT.",
   position_movement: "When both Global legs complete, the member’s current seat is history and a new active seat is opened. Old rows are never deleted.",
 };

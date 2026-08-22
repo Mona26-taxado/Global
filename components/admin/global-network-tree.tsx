@@ -827,7 +827,7 @@ export function GlobalNetworkTree({
             Existing confirmed positions remain unchanged. The live tree is one pyramid (root, then LEFT and RIGHT).
             Previous seats stay under that same LEFT/RIGHT as HISTORY / WAS — not beside the root. Current seats are ACTIVE.
             Current seats are ACTIVE only. Quoted unpaid placements are listed as pending — they do not occupy EMPTY slots
-            (first-empty: top to bottom, LEFT then RIGHT).
+            (first-empty: ROOT.LEFT, that member’s LEFT+RIGHT, then ROOT.RIGHT stays unlocked).
           </p>
         </div>
       </div>

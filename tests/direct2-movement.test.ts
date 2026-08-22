@@ -232,12 +232,13 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await finalizeConfirmedDirect2Placement("user_payer", "PLAN_100", "0xdirect2verify");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_right", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
-    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.parent_id).toBe(
+    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.parent_id).toBeNull();
+    expect(currentPosition(store.network_positions, "user_right", "PLAN_100")?.parent_id).toBe(
       currentPosition(store.network_positions, "user_e8e1", "PLAN_100")?.id,
     );
   });
 
-  it("8–9. first-empty LEFT then RIGHT; ACTIVE+RESERVED occupy; HISTORY does not", async () => {
+  it("8–9. first-empty ROOT leg-first; ACTIVE occupies; HISTORY does not", async () => {
     await member("user_a", "GXAAAAAA", ADDR.A);
     await member("user_b", "GXBBBBBB", ADDR.B);
     await member("user_c", "GXCCCCCC", ADDR.C);
@@ -251,12 +252,12 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     const c = await placeUser("user_c", "PLAN_100");
     expect(b.parent_id).toBe(a.id);
     expect(b.position).toBe("LEFT");
-    expect(c.parent_id).toBe(a.id);
-    expect(c.position).toBe("RIGHT");
+    expect(c.parent_id).toBe(b.id);
+    expect(c.position).toBe("LEFT");
     expect(reservedPosition((await readStore()).network_positions, "user_a", "PLAN_100")).toBeNull();
     const d = await placeUser("user_d", "PLAN_100");
     expect(d.parent_id).toBe(b.id);
-    expect(d.position).toBe("LEFT");
+    expect(d.position).toBe("RIGHT");
     await withStore((store) => {
       const hist = store.network_positions.find((p) => p.id === a.id)!;
       hist.status = "HISTORY";

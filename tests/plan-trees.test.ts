@@ -231,9 +231,10 @@ describe("plan-scoped Global trees", () => {
     const p1Y = await placeUser("user_y", "P1");
     const p1Z = await placeUser("user_z", "P1");
     expect(p1X.parent_id).toBe(p1A.id);
-    expect(p1Y.parent_id).toBe(p1A.id);
-    expect(p1Y.position).toBe("RIGHT");
+    expect(p1Y.parent_id).toBe(p1X.id);
+    expect(p1Y.position).toBe("LEFT");
     expect(p1Z.parent_id).toBe(p1X.id);
+    expect(p1Z.position).toBe("RIGHT");
 
     await confirmPlan("user_a", "A", "P2");
     await confirmPlan("user_x", "X", "P2");
@@ -244,8 +245,8 @@ describe("plan-scoped Global trees", () => {
     expect(p2A.id).not.toBe(p1A.id);
     expect(p2X.parent_id).toBe(p2A.id);
     expect(p2X.position).toBe("LEFT");
-    expect(p2Y.parent_id).toBe(p2A.id);
-    expect(p2Y.position).toBe("RIGHT");
+    expect(p2Y.parent_id).toBe(p2X.id);
+    expect(p2Y.position).toBe("LEFT");
 
     await withStore((store) => {
       store.plans.push({
