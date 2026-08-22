@@ -111,6 +111,20 @@ export function recipientConfigured() {
 
 export const REGISTRATION_USD = 5;
 
+/** Configured genesis/admin Global root (GXGLOBAL / wallet tail 2575). Not a normal member. */
+export const DEFAULT_GENESIS_REFERRAL_CODE = "GXGLOBAL";
+export const DEFAULT_GENESIS_WALLET = "0x4C914838613a605b1eF256816C1Ac8912c172575";
+
+export function genesisReferralCode() {
+  const raw = process.env.GENESIS_REFERRAL_CODE?.trim();
+  return raw || DEFAULT_GENESIS_REFERRAL_CODE;
+}
+
+export function genesisWalletAddress() {
+  const raw = process.env.GENESIS_WALLET_ADDRESS?.trim();
+  return (raw || DEFAULT_GENESIS_WALLET).toLowerCase();
+}
+
 export const DEFAULT_PLANS = [
   {
     code: "PLAN_100",

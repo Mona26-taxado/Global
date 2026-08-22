@@ -77,7 +77,7 @@ function makeHole(current: Node, position: "LEFT" | "RIGHT", userId: string): Ho
   };
 }
 
-function isForestRoot(node: Node, ids: Set<string>) {
+export function isForestRoot(node: Node, ids: Set<string>) {
   return !node.parent_id || !ids.has(node.parent_id);
 }
 

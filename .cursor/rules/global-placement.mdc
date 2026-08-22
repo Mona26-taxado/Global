@@ -13,4 +13,5 @@ alwaysApply: true
 - Failed / cancelled / unpaid Direct #2 → expire the intent; tree unchanged; **no new ACTIVE**.
 - Identical PREPARE/CONFIRM/occupancy/cycle for PLAN_100 / PLAN_200 / PLAN_500 / PLAN_1000 and every future admin-created plan. No base-plan bypass, no amount-specific tree behavior.
 - First-empty: ROOT-level leg-first only (not whole-tree BFS). ROOT.LEFT, then that member’s immediate ACTIVE LEFT+RIGHT, then ROOT.RIGHT. One-time unlock after that first-leg cycleComplete; do not relock if the old left-head re-enters. Not recursive. Same engine for every plan_id (including re-entry).
+- Genesis/admin ROOT only (configured GXGLOBAL): if that user is the plan’s current ACTIVE forest ROOT and cycleComplete(ROOT), an explicit ADMIN_GENESIS_RECONCILIATION may HISTORY the old ROOT and open a new ACTIVE at the shared first-empty. No fake GLOBAL_REENTRY tx, no COMPANY_GENESIS rewrite. Normal users still pay re-entry. Same rule for every plan_id. Idempotent. Do not auto-move anyone else in the same apply.
 - Do not rewrite confirmed txs, referrals, $5 registration, plan unlock order, or Mainnet settings.

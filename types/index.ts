@@ -151,6 +151,8 @@ export type NetworkPositionRow = {
   reentry_tx_hash?: string | null;
   /** Direct #2 buyer whose plan payment funds this reserved movement. Blocks a second GLOBAL_REENTRY for the same cycle. */
   funded_by_user_id?: string | null;
+  /** Explicit admin/genesis ROOT move. Never a substitute for a paid GLOBAL_REENTRY. */
+  source?: "ADMIN_GENESIS_RECONCILIATION" | string | null;
 };
 
 export type GlobalConfig = {
