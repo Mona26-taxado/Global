@@ -364,17 +364,20 @@ export async function confirmPayment(input: {
     }
     return { transaction, registration, placement: { ok: true as const } };
   } catch (error) {
-    if (error instanceof PlacementError && (error.code === "STALE_ROUTE" || error.code === "RECIPIENT_CHANGED")) {
-      const transaction = await withStore((store) => {
-        const row = store.transactions.find((t) => t.id === draftId)!;
-        row.placement_status = error.code;
-        return row;
-      });
-      return {
-        transaction,
-        registration: await getRegistration(input.userId),
-        placement: { ok: false as const, code: error.code, message: error.message },
-      };
+    if (error instanceof PlacementError) {
+      const code = error.code;
+      if (code === "STALE_ROUTE" || code === "RECIPIENT_CHANGED") {
+        const transaction = await withStore((store) => {
+          const row = store.transactions.find((t) => t.id === draftId)!;
+          row.placement_status = code;
+          return row;
+        });
+        return {
+          transaction,
+          registration: await getRegistration(input.userId),
+          placement: { ok: false as const, code, message: error.message },
+        };
+      }
     }
     const pending =
       (error instanceof ChainVerifyError && error.code === "PENDING") || isRetryableRpcError(error);
