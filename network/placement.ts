@@ -31,14 +31,36 @@ export function placementRoots(nodes: Node[]): Node[] {
   });
 }
 
-function childMap(live: Node[]) {
+function isHistoryNode(node: Node) {
+  return node.status === "HISTORY";
+}
+
+/**
+ * Structural child for one parent+side. ACTIVE always wins over HISTORY.
+ * Payload/store order must not replace a live ACTIVE occupant.
+ * RESERVED never selected. HISTORY only if no ACTIVE, preferring a row that still has descendants.
+ */
+function pickWalkChild(nodes: Node[], parentId: string, side: "LEFT" | "RIGHT"): Node | undefined {
+  const cands = nodes.filter((n) => n.parent_id === parentId && n.position === side);
+  const active = cands.filter(isActiveNode).sort((a, b) => a.id.localeCompare(b.id));
+  if (active[0]) return active[0];
+  const history = cands.filter(isHistoryNode);
+  if (!history.length) return undefined;
+  const useful = history.filter((h) => nodes.some((n) => n.parent_id === h.id));
+  const pool = useful.length ? useful : history;
+  return [...pool].sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+
+function walkChildMap(nodes: Node[]) {
   const byParent = new Map<string, { left?: Node; right?: Node }>();
-  for (const node of live) {
-    if (!node.parent_id) continue;
-    const slot = byParent.get(node.parent_id) ?? {};
-    if (node.position === "LEFT") slot.left = node;
-    if (node.position === "RIGHT") slot.right = node;
-    byParent.set(node.parent_id, slot);
+  const parentIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.parent_id) parentIds.add(node.parent_id);
+  }
+  for (const parentId of parentIds) {
+    const left = pickWalkChild(nodes, parentId, "LEFT");
+    const right = pickWalkChild(nodes, parentId, "RIGHT");
+    if (left || right) byParent.set(parentId, { left, right });
   }
   return byParent;
 }
@@ -126,8 +148,8 @@ function walkMaps(nodes: Node[]): WalkMaps {
   return {
     nodes,
     ids: new Set(nodes.map((n) => n.id)),
-    byOcc: childMap(liveNodes(nodes)),
-    byAll: childMap(nodes),
+    byOcc: walkChildMap(liveNodes(nodes)),
+    byAll: walkChildMap(nodes),
   };
 }
 

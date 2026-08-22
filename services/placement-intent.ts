@@ -140,6 +140,15 @@ export function failPendingIntents(store: StoreShape, buyerId: string, planId?: 
   }
 }
 
+/** Expire one unpaid quote. No-op unless PENDING and tx_hash is empty. Does not touch seats or txs. */
+export function expireUnpaidPendingIntent(store: StoreShape, intentId: string) {
+  const row = (store.payment_intents ?? []).find((i) => i.id === intentId);
+  if (!row || row.status !== "PENDING" || row.tx_hash) return false;
+  row.status = "STALE_ROUTE";
+  row.placement_status = "BLOCKED_STALE_ROUTE";
+  return true;
+}
+
 function payeeWallet(intent: PaymentIntentRow) {
   return (intent.movement_recipient_wallet ?? intent.candidate_recipient_wallet)?.toLowerCase() ?? null;
 }

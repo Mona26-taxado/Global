@@ -208,4 +208,21 @@ describe("authoritative cycleComplete callers (no occupyingOk bypass)", () => {
     expect(routing).not.toMatch(/isBase/);
     expect(routing).toMatch(/if \(!qualifiesForPlanGlobal\(store, sponsor\.id, planId, buyer\.id\)\)/);
   });
+
+  it("one shared first-empty; ACTIVE walk child beats HISTORY; PREPARE cannot insert seats", () => {
+    const placement = readFileSync(join(root, "network/placement.ts"), "utf8");
+    expect(placement).toMatch(/function pickWalkChild/);
+    expect(placement).toMatch(/const active = cands\.filter\(isActiveNode\)/);
+    expect(placement).toMatch(/export const findReentryPlacement = findFirstEmptyPlacement/);
+    expect(placement).toMatch(/export const findPowerlinePlacement = findFirstEmptyPlacement/);
+    expect(placement).not.toMatch(/slot\.left = node/);
+
+    const intent = readFileSync(join(root, "services/placement-intent.ts"), "utf8");
+    expect(intent).toMatch(/const hole = findFirstEmptyPlacement\(scoped, userId\)/);
+    expect(intent).toMatch(/export function expireUnpaidPendingIntent/);
+
+    const users = readFileSync(join(root, "services/users.ts"), "utf8");
+    expect(users).toMatch(/PREPARE_MUST_NOT_INSERT_POSITION/);
+    expect(users).toMatch(/const placement = findFirstEmptyPlacement\(scoped, userId\)/);
+  });
 });

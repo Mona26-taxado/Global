@@ -5,7 +5,7 @@ import {
   findReentryPlacement,
   rootSecondLegUnlocked,
 } from "../network/placement";
-import { quoteDirect2InStore, quoteReentryInStore } from "../services/placement-intent";
+import { quoteDirect2InStore, quoteReentryInStore, firstEmptyQuote, expireUnpaidPendingIntent } from "../services/placement-intent";
 import type { Store } from "../lib/store";
 import type { NetworkPositionRow } from "../types";
 
@@ -173,6 +173,63 @@ describe("leg-first Global allocator", () => {
     expect(intent.candidate_position).toBe("LEFT");
   });
 
+  it("ACTIVE + later HISTORY on same parent/side ⇒ ACTIVE wins", () => {
+    const nodes = [
+      n("root", "ROOT", null, null, 0),
+      n("e8e1", "e8e1", "root", "LEFT", 1),
+      n("e727", "e727", "root", "RIGHT", 1),
+      n("ffe0", "ffe0", "e8e1", "RIGHT", 2),
+      n("later-hist", "ghost", "root", "LEFT", 1, "HISTORY"),
+    ];
+    const hole = holeOf(nodes);
+    expect(hole.parent_id).toBe("e8e1");
+    expect(hole.position).toBe("LEFT");
+  });
+
+  it("HISTORY is walked only when no ACTIVE child occupies that side", () => {
+    const nodes = [
+      n("root", "ROOT", null, null, 0, "HISTORY"),
+      n("old-left", "L", "root", "LEFT", 1, "HISTORY"),
+      n("live", "LIVE", "old-left", "LEFT", 2),
+    ];
+    const hole = holeOf(nodes);
+    expect(hole.parent_id).toBe("live");
+    expect(hole.position).toBe("LEFT");
+  });
+
+  it("payload order does not change the first-empty hole", () => {
+    const base = [
+      n("root", "ROOT", null, null, 0),
+      n("e8e1", "e8e1", "root", "LEFT", 1),
+      n("e727", "e727", "root", "RIGHT", 1),
+      n("ffe0", "ffe0", "e8e1", "RIGHT", 2),
+      n("hist-left", "ghost", "root", "LEFT", 1, "HISTORY"),
+      n("rsv", "rsv", "e8e1", "LEFT", 2, "RESERVED"),
+    ];
+    const reversed = [...base].reverse();
+    const a = holeOf(base);
+    const b = holeOf(reversed);
+    expect(a.parent_id).toBe("e8e1");
+    expect(a.position).toBe("LEFT");
+    expect(b).toEqual(a);
+  });
+
+  it("ACTIVE-over-HISTORY child pick is the same for every plan_id", () => {
+    const fps = PLANS.map((plan) => {
+      const nodes = [
+        n(`${plan}-root`, "ROOT", null, null, 0),
+        n(`${plan}-e8e1`, "e8e1", `${plan}-root`, "LEFT", 1),
+        n(`${plan}-e727`, "e727", `${plan}-root`, "RIGHT", 1),
+        n(`${plan}-ffe0`, "ffe0", `${plan}-e8e1`, "RIGHT", 2),
+        n(`${plan}-hist`, "ghost", `${plan}-root`, "LEFT", 1, "HISTORY"),
+      ];
+      const hole = holeOf(nodes);
+      return { parentTail: hole.parent_id?.endsWith("-e8e1"), side: hole.position };
+    });
+    for (const fp of fps.slice(1)) expect(fp).toEqual(fps[0]);
+    expect(fps[0]).toEqual({ parentTail: true, side: "LEFT" });
+  });
+
   it("one-time unlock: HISTORY first-leg head keeps ROOT.RIGHT open after that member moves", () => {
     const nodes = [
       n("root", "ROOT", null, null, 0),
@@ -187,17 +244,90 @@ describe("leg-first Global allocator", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("repaired PLAN_200: next legal seat is e8e1.LEFT, not e727.LEFT", () => {
+  it("repaired PLAN_200 rows ⇒ first empty is e8e1.LEFT, not e727.LEFT", () => {
     const nodes = [
       n("pos_ea0064b3d96b1513", "u2575", null, null, 0),
       n("pos_6e85f6797c2c4677", "ue8e1", "pos_ea0064b3d96b1513", "LEFT", 1),
+      n("pos_d6042a7636892d44", "ue727", "pos_ea0064b3d96b1513", "RIGHT", 1, "HISTORY"),
+      n("pos_994fe46589c35c1e", "u2575", "pos_6e85f6797c2c4677", "LEFT", 2, "HISTORY"),
+      n("pos_c5a24983cb573a70", "ue727", "pos_ea0064b3d96b1513", "RIGHT", 1),
+      n("pos_fd3159e16f8fffcf", "u2575", "pos_6e85f6797c2c4677", "LEFT", 2, "HISTORY"),
       n("pos_3d67e0159d178b86", "uffe0", "pos_6e85f6797c2c4677", "RIGHT", 2),
-      n("pos_e727_right", "ue727", "pos_ea0064b3d96b1513", "RIGHT", 1),
+      n("pos_0ce5694739802e93", "ue8e1", "pos_c5a24983cb573a70", "LEFT", 2, "HISTORY"),
+      n("pos_00848c9ad81c034d", "u24", "pos_ea0064b3d96b1513", "LEFT", 1, "HISTORY"),
     ];
-    expect(rootSecondLegUnlocked(nodes, "pos_ea0064b3d96b1513")).toBe(false);
     const hole = holeOf(nodes);
     expect(hole.parent_id).toBe("pos_6e85f6797c2c4677");
     expect(hole.position).toBe("LEFT");
+    const store = storeFor("PLAN_200", nodes.map((row) => ({
+      ...row,
+      plan_id: "PLAN_200",
+      cycle: Math.floor(row.depth / 2),
+      started_at: "2026-08-22T00:00:00.000Z",
+    })));
+    store.users.push({ id: "ue8e1", referral_code: "GXFOUNDER", sponsor_id: null, is_demo: false, display_name: "e8e1", created_at: "2026-08-22T00:00:00.000Z" });
+    store.wallets.push({
+      id: "w-e8e1",
+      user_id: "ue8e1",
+      address: "0xd77ec55eb56ace50456515f018b82a6de187e8e1",
+      wallet_type: "injected",
+      chain_id: 80002,
+      verified: true,
+      created_at: "2026-08-22T00:00:00.000Z",
+    });
+    const quote = firstEmptyQuote(store, "PLAN_200", "NEXT");
+    expect(quote.parent_id).toBe("pos_6e85f6797c2c4677");
+    expect(quote.position).toBe("LEFT");
+    expect(quote.recipient_wallet).toBe("0xd77ec55eb56ace50456515f018b82a6de187e8e1");
+  });
+
+  it("pending stale quote with tx_hash null can be invalidated safely", () => {
+    const store = storeFor("PLAN_200", [
+      { id: "root", user_id: "u-root", plan_id: "PLAN_200", parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+    ]);
+    store.payment_intents = [
+      {
+        id: "intent_9bff60657828ff51",
+        kind: "DIRECT2_PLACEMENT",
+        status: "PENDING",
+        plan_id: "PLAN_200",
+        tx_hash: null,
+        quoted_at: "2026-08-22T10:49:04.339Z",
+        amount_usd: 200,
+        buyer_user_id: "u-bx",
+        mover_user_id: "u-sx",
+        skip_placement: false,
+        candidate_parent_position_id: "pos_c5a24983cb573a70",
+        candidate_position: "LEFT",
+        candidate_depth: 2,
+        candidate_recipient_user_id: "ue727",
+        candidate_recipient_wallet: "0xa11dbd434aed4fd03cdc79345295687c8c06e727",
+      },
+      {
+        id: "intent_confirmed_keep",
+        kind: "DIRECT2_PLACEMENT",
+        status: "CONFIRMED",
+        plan_id: "PLAN_200",
+        tx_hash: "0xabc",
+        quoted_at: "2026-08-22T09:00:00.000Z",
+        amount_usd: 200,
+        buyer_user_id: "u-other",
+        mover_user_id: "u-sx",
+        candidate_parent_position_id: "root",
+        candidate_position: "LEFT",
+        candidate_depth: 1,
+        candidate_recipient_user_id: "u-root",
+        candidate_recipient_wallet: "0x1111111111111111111111111111111111111111",
+      },
+    ];
+    const positionsBefore = JSON.stringify(store.network_positions);
+    const txsBefore = JSON.stringify(store.transactions);
+    expect(expireUnpaidPendingIntent(store, "intent_9bff60657828ff51")).toBe(true);
+    expect(store.payment_intents[0]?.status).toBe("STALE_ROUTE");
+    expect(expireUnpaidPendingIntent(store, "intent_confirmed_keep")).toBe(false);
+    expect(store.payment_intents[1]?.status).toBe("CONFIRMED");
+    expect(JSON.stringify(store.network_positions)).toBe(positionsBefore);
+    expect(JSON.stringify(store.transactions)).toBe(txsBefore);
   });
 });
 
