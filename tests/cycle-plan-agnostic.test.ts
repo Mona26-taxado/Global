@@ -214,7 +214,7 @@ describe("authoritative cycleComplete callers (no occupyingOk bypass)", () => {
     expect(placement).toMatch(/function pickWalkChild/);
     expect(placement).toMatch(/const active = cands\.filter\(isActiveNode\)/);
     expect(placement).toMatch(/function visitLevelOrder/);
-    expect(placement).toMatch(/function phase2LevelOrder/);
+    expect(placement).not.toMatch(/function visitPreorder/);
     expect(placement).toMatch(/export const findReentryPlacement = findFirstEmptyPlacement/);
     expect(placement).toMatch(/export const findPowerlinePlacement = findFirstEmptyPlacement/);
     expect(placement).not.toMatch(/slot\.left = node/);

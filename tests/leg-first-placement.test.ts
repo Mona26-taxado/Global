@@ -3,9 +3,8 @@ import {
   cycleComplete,
   findFirstEmptyPlacement,
   findReentryPlacement,
-  rootSecondLegUnlocked,
 } from "../network/placement";
-import { quoteDirect2InStore, quoteReentryInStore, firstEmptyQuote, expireUnpaidPendingIntent } from "../services/placement-intent";
+import { quoteDirect2InStore, firstEmptyQuote, expireUnpaidPendingIntent, confirmDirect2FromIntent, intentPayee } from "../services/placement-intent";
 import type { Store } from "../lib/store";
 import type { NetworkPositionRow } from "../types";
 
@@ -29,7 +28,7 @@ function holeOf(nodes: ReturnType<typeof n>[], userId = "NEXT") {
   return findFirstEmptyPlacement(nodes, userId);
 }
 
-describe("leg-first Global allocator", () => {
+describe("level-order Global allocator", () => {
   it("CASE 1: ROOT only → next = ROOT.LEFT", () => {
     const nodes = [n("root", "ROOT", null, null, 0)];
     const hole = holeOf(nodes);
@@ -37,61 +36,56 @@ describe("leg-first Global allocator", () => {
     expect(hole.position).toBe("LEFT");
   });
 
-  it("CASE 2: ROOT.LEFT = A → next = A.LEFT, not ROOT.RIGHT", () => {
-    const nodes = [n("root", "ROOT", null, null, 0), n("A", "A", "root", "LEFT", 1)];
-    const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("A");
-    expect(hole.position).toBe("LEFT");
-    expect(rootSecondLegUnlocked(nodes, "root")).toBe(false);
-  });
-
-  it("CASE 3: A.LEFT = B → next = A.RIGHT", () => {
-    const nodes = [
-      n("root", "ROOT", null, null, 0),
-      n("A", "A", "root", "LEFT", 1),
-      n("B", "B", "A", "LEFT", 2),
-    ];
-    const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("A");
-    expect(hole.position).toBe("RIGHT");
-  });
-
-  it("CASE 4: A.LEFT + A.RIGHT ACTIVE → ROOT.RIGHT eligible", () => {
-    const nodes = [
-      n("root", "ROOT", null, null, 0),
-      n("A", "A", "root", "LEFT", 1),
-      n("B", "B", "A", "LEFT", 2),
-      n("C", "C", "A", "RIGHT", 2),
-    ];
-    expect(cycleComplete(nodes, "A")).toBe(true);
-    expect(rootSecondLegUnlocked(nodes, "root")).toBe(true);
+  it("CASE 2: ROOT.LEFT = B → next = ROOT.RIGHT, not B.LEFT", () => {
+    const nodes = [n("root", "A", null, null, 0), n("B", "B", "root", "LEFT", 1)];
     const hole = holeOf(nodes);
     expect(hole.parent_id).toBe("root");
     expect(hole.position).toBe("RIGHT");
   });
 
-  it.each(PLANS)("%s CASE 5: after ROOT.RIGHT unlocks, complete that row before deeper LEFT-subtree holes", (plan) => {
+  it("CASE 3: B at ROOT.LEFT and B.LEFT filled → still ROOT.RIGHT first", () => {
     const nodes = [
-      n(`${plan}-root`, "ROOT", null, null, 0),
-      n(`${plan}-A`, "A", `${plan}-root`, "LEFT", 1),
-      n(`${plan}-D`, "D", `${plan}-root`, "RIGHT", 1),
-      n(`${plan}-B`, "B", `${plan}-A`, "LEFT", 2),
-      n(`${plan}-C`, "C", `${plan}-A`, "RIGHT", 2),
+      n("root", "A", null, null, 0),
+      n("B", "B", "root", "LEFT", 1),
+      n("BL", "BL", "B", "LEFT", 2),
     ];
     const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe(`${plan}-D`);
-    expect(hole.position).toBe("LEFT");
-    const withDL = [...nodes, n(`${plan}-DL`, "DL", `${plan}-D`, "LEFT", 2)];
-    const next = holeOf(withDL);
-    expect(next.parent_id).toBe(`${plan}-D`);
-    expect(next.position).toBe("RIGHT");
-    const withBoth = [...withDL, n(`${plan}-DR`, "DR", `${plan}-D`, "RIGHT", 2)];
-    const deeper = holeOf(withBoth);
-    expect(deeper.parent_id).toBe(`${plan}-B`);
-    expect(deeper.position).toBe("LEFT");
+    expect(hole.parent_id).toBe("root");
+    expect(hole.position).toBe("RIGHT");
   });
 
-  it.each(PLANS)("%s CASE 5b: unlocked HISTORY left-head + ACTIVE ROOT.RIGHT → ROOT.RIGHT.LEFT before deeper left-head.LEFT", (plan) => {
+  it("CASE 4: ROOT.LEFT + ROOT.RIGHT ACTIVE → next is LEFT-child.LEFT", () => {
+    const nodes = [
+      n("root", "A", null, null, 0),
+      n("B", "B", "root", "LEFT", 1),
+      n("C", "C", "root", "RIGHT", 1),
+    ];
+    expect(cycleComplete(nodes, "root")).toBe(true);
+    const hole = holeOf(nodes);
+    expect(hole.parent_id).toBe("B");
+    expect(hole.position).toBe("LEFT");
+  });
+
+  it.each(PLANS)("%s CASE 5: after both ROOT legs, complete that row LEFT to RIGHT", (plan) => {
+    const nodes = [
+      n(`${plan}-root`, "A", null, null, 0),
+      n(`${plan}-B`, "B", `${plan}-root`, "LEFT", 1),
+      n(`${plan}-C`, "C", `${plan}-root`, "RIGHT", 1),
+    ];
+    const hole = holeOf(nodes);
+    expect(hole.parent_id).toBe(`${plan}-B`);
+    expect(hole.position).toBe("LEFT");
+    const withBL = [...nodes, n(`${plan}-BL`, "BL", `${plan}-B`, "LEFT", 2)];
+    const next = holeOf(withBL);
+    expect(next.parent_id).toBe(`${plan}-B`);
+    expect(next.position).toBe("RIGHT");
+    const withBoth = [...withBL, n(`${plan}-BR`, "BR", `${plan}-B`, "RIGHT", 2)];
+    const thenC = holeOf(withBoth);
+    expect(thenC.parent_id).toBe(`${plan}-C`);
+    expect(thenC.position).toBe("LEFT");
+  });
+
+  it.each(PLANS)("%s CASE 5b: HISTORY ancestry + ACTIVE ROOT.RIGHT → ROOT.RIGHT.LEFT before deeper left-head.LEFT", (plan) => {
     const nodes = [
       n(`${plan}-old-root`, "u2575", null, null, 0, "HISTORY"),
       n(`${plan}-old-left`, "ue8e1", `${plan}-old-root`, "LEFT", 1, "HISTORY"),
@@ -99,7 +93,6 @@ describe("leg-first Global allocator", () => {
       n(`${plan}-nffe0`, "uffe0", `${plan}-old-left`, "RIGHT", 2),
       n(`${plan}-ne727`, "ue727", `${plan}-old-root`, "RIGHT", 1),
     ];
-    expect(rootSecondLegUnlocked(nodes, `${plan}-old-root`)).toBe(true);
     const hole = holeOf(nodes);
     expect(hole.parent_id).toBe(`${plan}-ne727`);
     expect(hole.position).toBe("LEFT");
@@ -108,107 +101,140 @@ describe("leg-first Global allocator", () => {
     expect(holeOf(withLeft).position).toBe("RIGHT");
   });
 
-  it("CASE 6: A.LEFT RESERVED + A.RIGHT ACTIVE → ROOT.RIGHT locked", () => {
+  it("CASE 6: RESERVED on ROOT.LEFT does not occupy; next is still ROOT.LEFT", () => {
     const nodes = [
-      n("root", "ROOT", null, null, 0),
-      n("A", "A", "root", "LEFT", 1),
-      n("B", "B", "A", "LEFT", 2, "RESERVED"),
-      n("C", "C", "A", "RIGHT", 2),
+      n("root", "A", null, null, 0),
+      n("ghost", "G", "root", "LEFT", 1, "RESERVED"),
     ];
-    expect(cycleComplete(nodes, "A")).toBe(false);
-    expect(rootSecondLegUnlocked(nodes, "root")).toBe(false);
     const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("A");
+    expect(hole.parent_id).toBe("root");
     expect(hole.position).toBe("LEFT");
   });
 
-  it("CASE 7: A.LEFT ACTIVE + A.RIGHT RESERVED → ROOT.RIGHT locked", () => {
+  it("CASE 7: ROOT.LEFT ACTIVE + ROOT.RIGHT RESERVED → ROOT.RIGHT", () => {
     const nodes = [
-      n("root", "ROOT", null, null, 0),
-      n("A", "A", "root", "LEFT", 1),
-      n("B", "B", "A", "LEFT", 2),
-      n("C", "C", "A", "RIGHT", 2, "RESERVED"),
+      n("root", "A", null, null, 0),
+      n("B", "B", "root", "LEFT", 1),
+      n("ghost", "G", "root", "RIGHT", 1, "RESERVED"),
     ];
-    expect(cycleComplete(nodes, "A")).toBe(false);
-    expect(rootSecondLegUnlocked(nodes, "root")).toBe(false);
+    expect(cycleComplete(nodes, "root")).toBe(false);
     const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("A");
+    expect(hole.parent_id).toBe("root");
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("CASE 8: same PHASE 1 and PHASE 2 holes for PLAN_100 / 200 / 500 / 1000 / PLAN_SYNTH", () => {
+  it("CASE 8: same level-order holes for PLAN_100 / 200 / 500 / 1000 / PLAN_SYNTH", () => {
     const fingerprints = PLANS.map((plan) => {
       const scoped = [
-        n(`${plan}-root`, "ROOT", null, null, 0),
-        n(`${plan}-A`, "A", `${plan}-root`, "LEFT", 1),
+        n(`${plan}-root`, "A", null, null, 0),
+        n(`${plan}-B`, "B", `${plan}-root`, "LEFT", 1),
       ];
       const h2 = holeOf(scoped);
-      const withB = [...scoped, n(`${plan}-B`, "B", `${plan}-A`, "LEFT", 2)];
-      const h3 = holeOf(withB);
-      const withC = [...withB, n(`${plan}-C`, "C", `${plan}-A`, "RIGHT", 2)];
+      const withC = [...scoped, n(`${plan}-C`, "C", `${plan}-root`, "RIGHT", 1)];
       const h4 = holeOf(withC);
-      const withD = [...withC, n(`${plan}-D`, "D", `${plan}-root`, "RIGHT", 1)];
-      const h5 = holeOf(withD);
-      const withDL = [...withD, n(`${plan}-DL`, "DL", `${plan}-D`, "LEFT", 2)];
-      const h5b = holeOf(withDL);
+      const withBL = [...withC, n(`${plan}-BL`, "BL", `${plan}-B`, "LEFT", 2)];
+      const h5 = holeOf(withBL);
       return {
-        case2Parent: h2.parent_id?.endsWith("-A"),
+        case2ParentRoot: h2.parent_id?.endsWith("-root"),
         case2Side: h2.position,
-        case3Side: h3.position,
-        case4ParentRoot: h4.parent_id?.endsWith("-root"),
+        case4ParentB: h4.parent_id?.endsWith("-B"),
         case4Side: h4.position,
-        case5ParentD: h5.parent_id?.endsWith("-D"),
         case5Side: h5.position,
-        case5bParentD: h5b.parent_id?.endsWith("-D"),
-        case5bSide: h5b.position,
       };
     });
     expect(fingerprints[0]).toEqual({
-      case2Parent: true,
-      case2Side: "LEFT",
-      case3Side: "RIGHT",
-      case4ParentRoot: true,
-      case4Side: "RIGHT",
-      case5ParentD: true,
-      case5Side: "LEFT",
-      case5bParentD: true,
-      case5bSide: "RIGHT",
+      case2ParentRoot: true,
+      case2Side: "RIGHT",
+      case4ParentB: true,
+      case4Side: "LEFT",
+      case5Side: "RIGHT",
     });
     for (const fp of fingerprints.slice(1)) {
       expect(fp).toEqual(fingerprints[0]);
     }
   });
 
-  it.each(PLANS)("%s CASE 9: re-entry quote uses the same two-phase hole (ROOT.RIGHT after first-leg)", (plan) => {
+  it.each(PLANS)("%s CASE 9: first-empty after ROOT.LEFT is ROOT.RIGHT (same for re-entry alias)", (plan) => {
     const positions: NetworkPositionRow[] = [
       { id: `${plan}-root`, user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: `${plan}-A`, user_id: "u-a", plan_id: plan, parent_id: `${plan}-root`, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: `${plan}-B`, user_id: "u-b", plan_id: plan, parent_id: `${plan}-A`, position: "LEFT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: `${plan}-C`, user_id: "u-c", plan_id: plan, parent_id: `${plan}-A`, position: "RIGHT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-B`, user_id: "u-a", plan_id: plan, parent_id: `${plan}-root`, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
     ];
-    const legal = findReentryPlacement(positions, "u-a");
+    const legal = findReentryPlacement(positions, "u-sx");
     expect(legal.parent_id).toBe(`${plan}-root`);
     expect(legal.position).toBe("RIGHT");
-    const store = storeFor(plan, positions);
-    const before = JSON.stringify(store.network_positions);
-    const intent = quoteReentryInStore(store, "u-a", plan);
-    expect(JSON.stringify(store.network_positions)).toBe(before);
-    expect(intent.candidate_parent_position_id).toBe(`${plan}-root`);
-    expect(intent.candidate_position).toBe("RIGHT");
   });
 
-  it.each(PLANS)("%s CASE 10: Direct #2 PREPARE still creates no occupying seat", (plan) => {
+  it.each(PLANS)("%s CASE 10: Direct #2 PREPARE still creates no occupying seat; next hole is ROOT.RIGHT", (plan) => {
     const positions: NetworkPositionRow[] = [
       { id: `${plan}-root`, user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: `${plan}-A`, user_id: "u-a", plan_id: plan, parent_id: `${plan}-root`, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-B`, user_id: "u-a", plan_id: plan, parent_id: `${plan}-root`, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
     ];
     const store = storeFor(plan, positions);
     const before = JSON.stringify(store.network_positions);
     const intent = quoteDirect2InStore(store, "u-sx", plan, "u-bx");
     expect(JSON.stringify(store.network_positions)).toBe(before);
     expect(store.network_positions.some((p) => p.status === "RESERVED")).toBe(false);
-    expect(intent.candidate_parent_position_id).toBe(`${plan}-A`);
-    expect(intent.candidate_position).toBe("LEFT");
+    expect(intent.candidate_parent_position_id).toBe(`${plan}-root`);
+    expect(intent.candidate_position).toBe("RIGHT");
+  });
+
+  it.each(PLANS)("%s story: B at A.LEFT, C at A.RIGHT moves A under B.LEFT, E at B.RIGHT moves B under C.LEFT; D stays out", (plan) => {
+    const store = storeFor(plan, [
+      { id: `${plan}-A`, user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+    ]);
+    store.users.push(
+      { id: "u-b", referral_code: "GXBBBBBB", sponsor_id: null, is_demo: false, display_name: "B", created_at: "2026-08-22T12:00:00.000Z" },
+      { id: "u-c", referral_code: "GXCCCCCC", sponsor_id: null, is_demo: false, display_name: "C", created_at: "2026-08-22T12:00:00.000Z" },
+      { id: "u-e", referral_code: "GXEEEEEE", sponsor_id: null, is_demo: false, display_name: "E", created_at: "2026-08-22T12:00:00.000Z" },
+      { id: "u-d", referral_code: "GXDDDDDD", sponsor_id: null, is_demo: false, display_name: "D", created_at: "2026-08-22T12:00:00.000Z" },
+      { id: "u-g", referral_code: "GXGGGGGG", sponsor_id: "u-c", is_demo: false, display_name: "G", created_at: "2026-08-22T12:00:00.000Z" },
+      { id: "u-j", referral_code: "GXJJJJJJ", sponsor_id: "u-e", is_demo: false, display_name: "J", created_at: "2026-08-22T12:00:00.000Z" },
+    );
+    store.wallets.push(
+      { id: "w-b", user_id: "u-b", address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", wallet_type: "injected", chain_id: 80002, verified: true, created_at: "2026-08-22T12:00:00.000Z" },
+      { id: "w-c", user_id: "u-c", address: "0xcccccccccccccccccccccccccccccccccccccccc", wallet_type: "injected", chain_id: 80002, verified: true, created_at: "2026-08-22T12:00:00.000Z" },
+    );
+    const qB = quoteDirect2InStore(store, "u-b", plan, "u-bx");
+    expect(qB.candidate_parent_position_id).toBe(`${plan}-A`);
+    expect(qB.candidate_position).toBe("LEFT");
+    expect(qB.movement_user_id).toBeUndefined();
+    confirmDirect2FromIntent(store, "u-bx", plan, `0xb-${plan}`, intentPayee(qB));
+    const bSeat = store.network_positions.find((p) => p.user_id === "u-b" && p.plan_id === plan && (p.status ?? "ACTIVE") === "ACTIVE")!;
+    expect(bSeat.parent_id).toBe(`${plan}-A`);
+    expect(bSeat.position).toBe("LEFT");
+
+    const qC = quoteDirect2InStore(store, "u-c", plan, "u-g");
+    expect(qC.candidate_parent_position_id).toBe(`${plan}-A`);
+    expect(qC.candidate_position).toBe("RIGHT");
+    expect(qC.movement_user_id).toBe("u-root");
+    expect(qC.movement_parent_position_id).toBe(bSeat.id);
+    expect(qC.movement_position).toBe("LEFT");
+    expect(intentPayee(qC).toLowerCase()).toBe("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    confirmDirect2FromIntent(store, "u-g", plan, `0xc-${plan}`, intentPayee(qC));
+    const aOld = store.network_positions.find((p) => p.id === `${plan}-A`)!;
+    expect(aOld.status).toBe("HISTORY");
+    const aLive = store.network_positions.find((p) => p.user_id === "u-root" && p.plan_id === plan && (p.status ?? "ACTIVE") === "ACTIVE")!;
+    expect(aLive.parent_id).toBe(bSeat.id);
+    expect(aLive.position).toBe("LEFT");
+    const cSeat = store.network_positions.find((p) => p.user_id === "u-c" && p.plan_id === plan && (p.status ?? "ACTIVE") === "ACTIVE")!;
+    expect(cSeat.parent_id).toBe(`${plan}-A`);
+    expect(cSeat.position).toBe("RIGHT");
+
+    const qE = quoteDirect2InStore(store, "u-e", plan, "u-j");
+    expect(qE.candidate_parent_position_id).toBe(bSeat.id);
+    expect(qE.candidate_position).toBe("RIGHT");
+    expect(qE.movement_user_id).toBe("u-b");
+    expect(qE.movement_parent_position_id).toBe(cSeat.id);
+    expect(qE.movement_position).toBe("LEFT");
+    expect(intentPayee(qE).toLowerCase()).toBe("0xcccccccccccccccccccccccccccccccccccccccc");
+    confirmDirect2FromIntent(store, "u-j", plan, `0xe-${plan}`, intentPayee(qE));
+    const bOld = store.network_positions.find((p) => p.id === bSeat.id)!;
+    expect(bOld.status).toBe("HISTORY");
+    const bLive = store.network_positions.find((p) => p.user_id === "u-b" && p.plan_id === plan && (p.status ?? "ACTIVE") === "ACTIVE")!;
+    expect(bLive.parent_id).toBe(cSeat.id);
+    expect(bLive.position).toBe("LEFT");
+    expect(store.network_positions.some((p) => p.user_id === "u-d" && p.plan_id === plan && (p.status ?? "ACTIVE") === "ACTIVE")).toBe(false);
+    expect((store.payment_intents ?? []).filter((i) => i.kind === "GLOBAL_REENTRY" && i.plan_id === plan)).toHaveLength(0);
   });
 
   it("ACTIVE + later HISTORY on same parent/side ⇒ ACTIVE wins", () => {
@@ -268,7 +294,7 @@ describe("leg-first Global allocator", () => {
     expect(fps[0]).toEqual({ parentTail: true, side: "LEFT" });
   });
 
-  it("one-time unlock: HISTORY first-leg head keeps ROOT.RIGHT open after that member moves", () => {
+  it("HISTORY first-leg head does not block ROOT.RIGHT after a new LEFT occupant", () => {
     const nodes = [
       n("root", "ROOT", null, null, 0),
       n("A-old", "A", "root", "LEFT", 1, "HISTORY"),
@@ -276,7 +302,6 @@ describe("leg-first Global allocator", () => {
       n("C", "C", "A-old", "RIGHT", 2),
       n("E", "E", "root", "LEFT", 1),
     ];
-    expect(rootSecondLegUnlocked(nodes, "root")).toBe(true);
     const hole = holeOf(nodes);
     expect(hole.parent_id).toBe("root");
     expect(hole.position).toBe("RIGHT");

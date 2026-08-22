@@ -27,7 +27,7 @@ describe("global placement (ROOT-level leg-first)", () => {
     nodes.push({ ...row, id, status });
   }
 
-  it("CASE 1: after ROOT.LEFT, next is that member’s LEFT, not ROOT.RIGHT", () => {
+  it("CASE 1: after ROOT.LEFT, next is ROOT.RIGHT", () => {
     const nodes: ReturnType<typeof findPlacement>[] = [];
     const a = findPlacement(nodes, "A");
     expect(a.parent_id).toBeNull();
@@ -37,22 +37,21 @@ describe("global placement (ROOT-level leg-first)", () => {
     expect(x.parent_id).toBe("pos-A");
     push(nodes, x, "pos-X");
     const y = findPlacement(nodes, "Y");
-    expect(y.position).toBe("LEFT");
-    expect(y.parent_id).toBe("pos-X");
+    expect(y.position).toBe("RIGHT");
+    expect(y.parent_id).toBe("pos-A");
   });
 
-  it("CASE 2: after first-leg LEFT+RIGHT, ROOT.RIGHT unlocks (X.RIGHT is not recursively locked)", () => {
+  it("CASE 2: ROOT.LEFT + ROOT.RIGHT then LEFT-child.LEFT", () => {
     const nodes: ReturnType<typeof findPlacement>[] = [];
     push(nodes, findPlacement(nodes, "A"), "pos-A");
     push(nodes, findPlacement(nodes, "X"), "pos-X");
-    push(nodes, findPlacement(nodes, "B"), "pos-B");
-    const c = findPlacement(nodes, "C");
-    expect(c.parent_id).toBe("pos-X");
-    expect(c.position).toBe("RIGHT");
-    push(nodes, c, "pos-C");
-    const d = findPlacement(nodes, "D");
-    expect(d.parent_id).toBe("pos-A");
-    expect(d.position).toBe("RIGHT");
+    const y = findPlacement(nodes, "Y");
+    expect(y.parent_id).toBe("pos-A");
+    expect(y.position).toBe("RIGHT");
+    push(nodes, y, "pos-Y");
+    const b = findPlacement(nodes, "B");
+    expect(b.parent_id).toBe("pos-X");
+    expect(b.position).toBe("LEFT");
   });
 
   it("CASE 3: RESERVED does not occupy, so the next call can take the same hole", () => {
@@ -76,14 +75,14 @@ describe("global placement (ROOT-level leg-first)", () => {
     expect(next.position).toBe("LEFT");
   });
 
-  it("re-entry CASE 1: ROOT with only LEFT X → X.LEFT, not ROOT.RIGHT", () => {
+  it("re-entry CASE 1: ROOT with only LEFT X → ROOT.RIGHT", () => {
     const nodes = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
     ];
     const hole = findReentryPlacement(nodes, "M");
-    expect(hole.parent_id).toBe("pos-X");
-    expect(hole.position).toBe("LEFT");
+    expect(hole.parent_id).toBe("pos-A");
+    expect(hole.position).toBe("RIGHT");
   });
 
   it("re-entry CASE 2: A.LEFT X and A.RIGHT Y → X.LEFT", () => {
@@ -109,15 +108,15 @@ describe("global placement (ROOT-level leg-first)", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("re-entry CASE 4: RESERVED ROOT.RIGHT does not latch; first-empty is X.LEFT", () => {
+  it("re-entry CASE 4: RESERVED ROOT.RIGHT does not occupy; first-empty is ROOT.RIGHT", () => {
     const nodes = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
       { id: "pos-R", user_id: "R", parent_id: "pos-A", position: "RIGHT" as const, depth: 1, status: "RESERVED" as const },
     ];
     const hole = findReentryPlacement(nodes, "M");
-    expect(hole.parent_id).toBe("pos-X");
-    expect(hole.position).toBe("LEFT");
+    expect(hole.parent_id).toBe("pos-A");
+    expect(hole.position).toBe("RIGHT");
   });
 
   it("re-entry CASE 5: plan live sets are independent", () => {
@@ -132,32 +131,32 @@ describe("global placement (ROOT-level leg-first)", () => {
     ];
     const h1 = findReentryPlacement(p1, "M");
     const h2 = findReentryPlacement(p2, "M");
-    expect(h1.parent_id).toBe("p1-X");
-    expect(h1.position).toBe("LEFT");
+    expect(h1.parent_id).toBe("p1-A");
+    expect(h1.position).toBe("RIGHT");
     expect(h2.parent_id).toBe("p2-X");
     expect(h2.position).toBe("LEFT");
   });
 
-  it("screenshot case: first-leg incomplete → X.RIGHT before ROOT.RIGHT", () => {
+  it("screenshot case: ROOT.LEFT filled → ROOT.RIGHT before the left-head’s children", () => {
     const nodes = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
       { id: "pos-Y", user_id: "Y", parent_id: "pos-X", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
     ];
     const hole = findReentryPlacement(nodes, "M");
-    expect(hole.parent_id).toBe("pos-X");
+    expect(hole.parent_id).toBe("pos-A");
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("HISTORY ROOT.RIGHT without a completed first-leg does not unlock ROOT.RIGHT", () => {
+  it("HISTORY ROOT.RIGHT does not occupy; next is still ROOT.RIGHT", () => {
     const nodes = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
       { id: "pos-Y", user_id: "Y", parent_id: "pos-A", position: "RIGHT" as const, depth: 1, status: "HISTORY" as const },
     ];
     const hole = findReentryPlacement(nodes, "M");
-    expect(hole.parent_id).toBe("pos-X");
-    expect(hole.position).toBe("LEFT");
+    expect(hole.parent_id).toBe("pos-A");
+    expect(hole.position).toBe("RIGHT");
   });
 
   it("X complete and ROOT.RIGHT ACTIVE → Y.RIGHT (same row) before X’s deeper LEFT subtree", () => {
@@ -428,8 +427,8 @@ describe("global placement (ROOT-level leg-first)", () => {
     ]);
     const intent = provisionDirect2SponsorInStore(store, "u-sponsor", "PLAN_100", "u-d2");
     expect(intent.status).toBe("PENDING");
-    expect(intent.candidate_parent_position_id).toBe("pos-left");
-    expect(intent.candidate_position).toBe("LEFT");
+    expect(intent.candidate_parent_position_id).toBe("pos-root");
+    expect(intent.candidate_position).toBe("RIGHT");
     expect(cycleComplete(store.network_positions, "pos-root")).toBe(false);
     expect(reservedPosition(store.network_positions, "u-root", "PLAN_100")).toBeNull();
   });

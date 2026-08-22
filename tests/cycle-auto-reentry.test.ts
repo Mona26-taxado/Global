@@ -161,12 +161,14 @@ describe("auto-queue re-entry when a cycle completes", () => {
       const store = storeFor([
         pos(plan, "root", "u-a", null, null, 0),
         pos(plan, "x", "u-x", "root", "LEFT", 1),
+        pos(plan, "y", "u-y", "root", "RIGHT", 1),
         pos(plan, "xleft", "u-xl", "x", "LEFT", 2),
       ]);
-      store.users.push(user("u-x", "GXXXXXXX"), user("u-xl", "GXXLEFTX"), user("u-sp", "GXSPONXX"), user("u-by", "GXBUYERX"));
+      store.users.push(user("u-x", "GXXXXXXX"), user("u-xl", "GXXLEFTX"), user("u-y", "GYYYYYYY"), user("u-sp", "GXSPONXX"), user("u-by", "GXBUYERX"));
       store.wallets.push(
         wallet("w-x", "u-x", "0x1111111111111111111111111111111111111111"),
         wallet("w-xl", "u-xl", "0x2222222222222222222222222222222222222222"),
+        wallet("w-y", "u-y", "0x4444444444444444444444444444444444444444"),
         wallet("w-sp", "u-sp", "0x3333333333333333333333333333333333333333"),
       );
       const scoped = () => store.network_positions.filter((p) => p.plan_id === plan);

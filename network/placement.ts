@@ -92,23 +92,6 @@ export function cycleComplete(nodes: Node[], parentPositionId: string) {
   return Boolean(activeChild(nodes, parentPositionId, "LEFT") && activeChild(nodes, parentPositionId, "RIGHT"));
 }
 
-/**
- * Tree ROOT only: ROOT.RIGHT is locked until some ROOT.LEFT seat (ACTIVE or HISTORY)
- * has cycleComplete (ACTIVE LEFT + ACTIVE RIGHT). That is a one-time unlock for the
- * plan tree: if the old left-head later moves, do not relock. An invalid ROOT.RIGHT
- * occupant does not unlock an empty ROOT.RIGHT. Not recursive to other parents.
- */
-export function rootSecondLegUnlocked(nodes: Node[], rootId: string) {
-  return nodes.some(
-    (n) => n.parent_id === rootId && n.position === "LEFT" && cycleComplete(nodes, n.id),
-  );
-}
-
-function rootRightIsLegalHole(current: Node, nodes: Node[], ids: Set<string>) {
-  if (!isForestRoot(current, ids)) return true;
-  return rootSecondLegUnlocked(nodes, current.id);
-}
-
 type WalkMaps = {
   nodes: Node[];
   ids: Set<string>;
@@ -117,36 +100,9 @@ type WalkMaps = {
 };
 
 /**
- * PHASE 1 only: ROOT.RIGHT still gated. Own LEFT then RIGHT, then LEFT child, then RIGHT child.
- */
-function visitPreorder<T>(
-  current: Node,
-  seen: Set<string>,
-  maps: WalkMaps,
-  onActive: (current: Node, kids: { left?: Node; right?: Node }) => T | undefined,
-): T | undefined {
-  if (seen.has(current.id)) return undefined;
-  seen.add(current.id);
-  if (occupiesSlot(current)) {
-    const hit = onActive(current, maps.byOcc.get(current.id) ?? {});
-    if (hit !== undefined) return hit;
-  }
-  const walk = maps.byAll.get(current.id) ?? {};
-  if (walk.left) {
-    const hit = visitPreorder(walk.left, seen, maps, onActive);
-    if (hit !== undefined) return hit;
-  }
-  if (walk.right) {
-    const hit = visitPreorder(walk.right, seen, maps, onActive);
-    if (hit !== undefined) return hit;
-  }
-  return undefined;
-}
-
-/**
- * PHASE 2: first-leg has unlocked ROOT.RIGHT. Strict level-order over the opened tree.
- * Top to bottom, LEFT before RIGHT on the same row. Same walk for every plan_id.
- * HISTORY is walked for ancestry only and never occupies.
+ * Strict level-order over the opened tree. Top to bottom, LEFT before RIGHT on the same row.
+ * ROOT.LEFT then ROOT.RIGHT (complete the current root cycle) before deeper holes.
+ * Same walk for every plan_id. HISTORY is walked for ancestry only and never occupies.
  */
 function visitLevelOrder<T>(
   start: Node,
@@ -170,20 +126,13 @@ function visitLevelOrder<T>(
   return undefined;
 }
 
-function phase2LevelOrder(root: Node, nodes: Node[], ids: Set<string>) {
-  return isForestRoot(root, ids) && rootSecondLegUnlocked(nodes, root.id);
-}
-
 function walkFirstEmpty<T>(
   root: Node,
   seen: Set<string>,
   maps: WalkMaps,
   onActive: (current: Node, kids: { left?: Node; right?: Node }) => T | undefined,
 ) {
-  if (phase2LevelOrder(root, maps.nodes, maps.ids)) {
-    return visitLevelOrder(root, seen, maps, onActive);
-  }
-  return visitPreorder(root, seen, maps, onActive);
+  return visitLevelOrder(root, seen, maps, onActive);
 }
 
 function walkMaps(nodes: Node[]): WalkMaps {
@@ -197,8 +146,8 @@ function walkMaps(nodes: Node[]): WalkMaps {
 
 /**
  * First empty Global seat. Identical for every plan_id (catalog and admin-created).
- * PHASE 1: ROOT.LEFT, that member’s immediate LEFT then RIGHT, then ROOT.RIGHT (one-time unlock).
- * PHASE 2: after that unlock, whole-tree level order (top to bottom, LEFT to RIGHT).
+ * Level-order: ROOT.LEFT, then ROOT.RIGHT, then row by row LEFT to RIGHT.
+ * Completing a parent’s RIGHT with Direct #2 funds that parent’s move to this same first-empty.
  * Holes attach under ACTIVE. HISTORY is walked for order only and never occupies.
  */
 export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {
@@ -212,9 +161,7 @@ export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {
   const seen = new Set<string>();
   const onActive = (current: Node, kids: { left?: Node; right?: Node }) => {
     if (!kids.left) return makeHole(current, "LEFT", userId);
-    if (!kids.right && rootRightIsLegalHole(current, maps.nodes, maps.ids)) {
-      return makeHole(current, "RIGHT", userId);
-    }
+    if (!kids.right) return makeHole(current, "RIGHT", userId);
     return undefined;
   };
   for (const root of roots) {
@@ -240,9 +187,8 @@ export function occupyingSeatsAfterEarlierHole(nodes: Node[]): Set<string> {
     walkFirstEmpty(root, seen, maps, (current, kids) => {
       if (!kids.left) holeSeen = true;
       else if (holeSeen) legacy.add(kids.left.id);
-      if (!kids.right) {
-        if (rootRightIsLegalHole(current, maps.nodes, maps.ids)) holeSeen = true;
-      } else if (holeSeen) legacy.add(kids.right.id);
+      if (!kids.right) holeSeen = true;
+      else if (holeSeen) legacy.add(kids.right.id);
       return undefined;
     });
   }

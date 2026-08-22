@@ -252,12 +252,12 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     const c = await placeUser("user_c", "PLAN_100", { allowUnpaidInsert: true });
     expect(b.parent_id).toBe(a.id);
     expect(b.position).toBe("LEFT");
-    expect(c.parent_id).toBe(b.id);
-    expect(c.position).toBe("LEFT");
+    expect(c.parent_id).toBe(a.id);
+    expect(c.position).toBe("RIGHT");
     expect(reservedPosition((await readStore()).network_positions, "user_a", "PLAN_100")).toBeNull();
     const d = await placeUser("user_d", "PLAN_100", { allowUnpaidInsert: true });
     expect(d.parent_id).toBe(b.id);
-    expect(d.position).toBe("RIGHT");
+    expect(d.position).toBe("LEFT");
     await withStore((store) => {
       const hist = store.network_positions.find((p) => p.id === a.id)!;
       hist.status = "HISTORY";
