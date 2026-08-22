@@ -152,7 +152,7 @@ export function inspectLegacyFundedMovement(store: Store, planId: string, fromPo
     cycle_complete: cycle,
     already_funded: funded,
     funding_tx_hash: evidence?.row.reentry_tx_hash ?? null,
-    funded_by_user_id: evidence?.row.funded_by_user_id ?? evidence?.tx.user_id ?? null,
+    funded_by_user_id: evidence?.row.funded_by_user_id ?? evidence?.tx?.user_id ?? null,
     current_legal_first_empty: hole
       ? {
           parent_id: hole.parent_id,
