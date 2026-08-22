@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ExternalLink,
@@ -20,6 +20,14 @@ import { formatTokenAmount } from "@/components/ui/data-list";
 import { occupyingSeatsAfterEarlierHole, type Node as PlacementNode } from "@/network/placement";
 import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
+import {
+  TREE_MAX_SCALE,
+  TREE_MIN_SCALE,
+  TREE_ZOOM_FACTOR,
+  fitTreeToViewport,
+  retainCenterOnResize,
+  zoomAroundViewportCenter,
+} from "@/lib/tree-viewport";
 import { api, shortAddr } from "@/lib/utils";
 
 export type CycleUser = {
@@ -128,24 +136,95 @@ function place(v: VisNode, originX: number, depth: number, out: Placed[]) {
   if (v.right) place(v.right, originX + lw + (v.left ? H_GAP : 0), depth + 1, out);
 }
 
-function Toolbar({ legendOpen, onLegend }: { legendOpen: boolean; onLegend: () => void }) {
-  const { zoomIn, zoomOut, resetTransform } = useControls();
+function Toolbar({
+  legendOpen,
+  onLegend,
+  canvasW,
+  canvasH,
+}: {
+  legendOpen: boolean;
+  onLegend: () => void;
+  canvasW: number;
+  canvasH: number;
+}) {
+  const { instance, setTransform } = useControls();
   const [pct, setPct] = useState(100);
+  const lastSize = useRef({ w: 0, h: 0 });
+
+  function applyFit(animate = true) {
+    const wrapper = instance.wrapperComponent;
+    if (!wrapper) return;
+    const content = instance.contentComponent;
+    const fit = fitTreeToViewport({
+      viewportWidth: wrapper.clientWidth,
+      viewportHeight: wrapper.clientHeight,
+      contentWidth: content?.offsetWidth || canvasW,
+      contentHeight: content?.offsetHeight || canvasH,
+    });
+    lastSize.current = { w: wrapper.clientWidth, h: wrapper.clientHeight };
+    setTransform(fit.positionX, fit.positionY, fit.scale, animate ? 200 : 0, "easeOut");
+  }
+
+  function applyZoom(factor: number) {
+    const wrapper = instance.wrapperComponent;
+    if (!wrapper) return;
+    const { scale, positionX, positionY } = instance.transformState;
+    const next = zoomAroundViewportCenter({
+      scale,
+      positionX,
+      positionY,
+      viewportWidth: wrapper.clientWidth,
+      viewportHeight: wrapper.clientHeight,
+      nextScale: scale * factor,
+    });
+    setTransform(next.positionX, next.positionY, next.scale, 160, "easeOut");
+  }
+
   useTransformEffect(({ state }) => {
     setPct(Math.round((state.scale ?? 1) * 100));
   });
+
+  useEffect(() => {
+    const wrapper = instance.wrapperComponent;
+    if (!wrapper) return;
+    lastSize.current = { w: wrapper.clientWidth, h: wrapper.clientHeight };
+    const ro = new ResizeObserver(() => {
+      const w = wrapper.clientWidth;
+      const h = wrapper.clientHeight;
+      const prev = lastSize.current;
+      if (!prev.w || !prev.h || (prev.w === w && prev.h === h)) {
+        lastSize.current = { w, h };
+        return;
+      }
+      const { scale, positionX, positionY } = instance.transformState;
+      const next = retainCenterOnResize({
+        scale,
+        positionX,
+        positionY,
+        prevViewportWidth: prev.w,
+        prevViewportHeight: prev.h,
+        nextViewportWidth: w,
+        nextViewportHeight: h,
+      });
+      lastSize.current = { w, h };
+      setTransform(next.positionX, next.positionY, next.scale, 0);
+    });
+    ro.observe(wrapper);
+    return () => ro.disconnect();
+  }, [instance, setTransform]);
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <div className="flex items-center gap-1 rounded-xl border border-line bg-elevated/80 p-1">
-        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-secondary hover:bg-white/5 hover:text-cream" onClick={() => zoomOut()} aria-label="Zoom out">
+        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-secondary hover:bg-white/5 hover:text-cream" onClick={() => applyZoom(1 / TREE_ZOOM_FACTOR)} aria-label="Zoom out">
           <Minus className="h-4 w-4" />
         </button>
         <span className="min-w-[3.25rem] text-center text-xs tabular text-mute">{pct}%</span>
-        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-secondary hover:bg-white/5 hover:text-cream" onClick={() => zoomIn()} aria-label="Zoom in">
+        <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-secondary hover:bg-white/5 hover:text-cream" onClick={() => applyZoom(TREE_ZOOM_FACTOR)} aria-label="Zoom in">
           <Plus className="h-4 w-4" />
         </button>
       </div>
-        <button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-line bg-elevated/80 px-3 text-xs text-secondary hover:text-cream" onClick={() => resetTransform()} aria-label="Fit to screen">
+        <button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-line bg-elevated/80 px-3 text-xs text-secondary hover:text-cream" onClick={() => applyFit(true)} aria-label="Fit to screen">
         <Maximize2 className="h-3.5 w-3.5" />
         Fit
       </button>
@@ -858,9 +937,31 @@ export function GlobalNetworkTree({
                 </div>
               )}
               {!loading && liveTree.length > 0 && (
-                <TransformWrapper minScale={0.25} maxScale={2.2} centerOnInit>
+                <TransformWrapper
+                  minScale={TREE_MIN_SCALE}
+                  maxScale={TREE_MAX_SCALE}
+                  limitToBounds={false}
+                  centerOnInit={false}
+                  alignmentAnimation={{ disabled: true }}
+                  velocityAnimation={{ disabled: true }}
+                  doubleClick={{ disabled: true }}
+                  panning={{ velocityDisabled: true }}
+                  wheel={{ step: 0.1 }}
+                  onInit={(ref) => {
+                    const wrapper = ref.instance.wrapperComponent;
+                    const content = ref.instance.contentComponent;
+                    if (!wrapper) return;
+                    const fit = fitTreeToViewport({
+                      viewportWidth: wrapper.clientWidth,
+                      viewportHeight: wrapper.clientHeight,
+                      contentWidth: content?.offsetWidth || canvasW,
+                      contentHeight: content?.offsetHeight || canvasH,
+                    });
+                    ref.setTransform(fit.positionX, fit.positionY, fit.scale, 0);
+                  }}
+                >
                   <div className="absolute right-3 top-3 z-10">
-                    <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} />
+                    <Toolbar legendOpen={legend} onLegend={() => setLegend((v) => !v)} canvasW={canvasW} canvasH={canvasH} />
                   </div>
                   <TransformComponent wrapperClass="!w-full !h-[560px] lg:!h-[640px]" contentClass="p-8">
                     <div className="relative" style={{ width: canvasW, height: canvasH }}>
