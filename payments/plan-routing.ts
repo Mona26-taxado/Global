@@ -1,13 +1,15 @@
 import { isAddress } from "viem";
 import { activeChainId, paymentRecipient } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
-import { cycleComplete, occupiesSlot } from "@/network/placement";
+import { bothLegsFilled, cycleComplete, occupiesSlot } from "@/network/placement";
 import {
   buyerDirectNumber,
   currentPosition,
   DIRECT_REFERRAL_LIMIT_REACHED,
+  occupyingPosition,
   placeUser,
   positionsForPlan,
+  provisionDirect2SponsorInStore,
   qualifyForReentry,
   reservedPosition,
 } from "@/services/users";
@@ -45,7 +47,7 @@ export function planDirectSlot(occupiedCount: number): 1 | 2 {
 }
 
 export function globalParentUserId(positions: NetworkPositionRow[], sponsorUserId: string, planId?: string): string | null {
-  const self = currentPosition(positions, sponsorUserId, planId);
+  const self = occupyingPosition(positions, sponsorUserId, planId);
   if (!self?.parent_id) return null;
   const parentPos = positions.find((p) => p.id === self.parent_id);
   return parentPos?.user_id ?? null;
@@ -191,7 +193,7 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
       slot: 1,
       directNumber: 1,
       globalParentUserId: null,
-      notice: "Direct #1: this USDT transfer goes to your sponsor’s verified wallet. You confirm it in your wallet.",
+      notice: "Direct #1: this USDT transfer goes to your sponsor’s verified wallet. You confirm it in your wallet. Direct #1 does not place anyone in Global.",
     };
   }
 
@@ -203,7 +205,7 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
       "Your sponsor is waiting for both existing directs to activate this plan before Global placement in this plan tree.",
     );
   }
-  const placed = await placeUser(sponsor.id, planId);
+  const placed = await withStore((store) => provisionDirect2SponsorInStore(store, sponsor.id, planId, buyerId));
   const afterPlace = await readStore();
   const reservedForThisEvent = movementReservedByPlacement(
     afterPlace.network_positions,
@@ -223,7 +225,7 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
       globalParentUserId: bound.recipientUserId,
       positionId: reservedForThisEvent.id,
       notice:
-        "Direct #2: Global movement was reserved first. This plan payment goes to the reserved seat’s new Global upline. No separate re-entry payment is required for this cycle.",
+        "Direct #2: Global movement is reserved until this transfer is verified. This plan payment goes to the reserved seat’s new Global upline. The sponsor seat stays RESERVED until confirmation.",
     };
   }
 
@@ -246,8 +248,9 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
     slot: 2,
     directNumber: 2,
     globalParentUserId: parentId,
+    positionId: placed.id,
     notice:
-      "Direct #2: your sponsor is placed in Global first. This transfer goes to their Global upline wallet, not to the sponsor.",
+      "Direct #2: your sponsor’s Global seat is reserved until this transfer is verified. This payment goes to their Global upline wallet, not to the sponsor.",
   };
 }
 
@@ -259,7 +262,9 @@ export function completingChildOf(
   const kids = positions.filter((p) => p.parent_id === parentPositionId && occupiesSlot(p));
   if (kids.length < 2) return null;
   const ordered = [...kids].sort((a, b) => {
-    const t = (a.started_at ?? "").localeCompare(b.started_at ?? "");
+    const ta = a.started_at || "\uffff";
+    const tb = b.started_at || "\uffff";
+    const t = ta.localeCompare(tb);
     if (t !== 0) return t;
     return (a.position === "LEFT" ? 0 : 1) - (b.position === "LEFT" ? 0 : 1);
   });
@@ -279,7 +284,7 @@ export function movementReservedByPlacement(
   if (!placed.parent_id) return null;
   const parentPos = positions.find((p) => p.id === placed.parent_id);
   if (!parentPos) return null;
-  if (!cycleComplete(positionsForPlan(positions, placed.plan_id), parentPos.id)) return null;
+  if (!bothLegsFilled(positionsForPlan(positions, placed.plan_id), parentPos.id)) return null;
   const reserved = reservedPosition(positions, parentPos.user_id, placed.plan_id);
   if (!reserved || reserved.status !== "RESERVED" || reserved.reentry_tx_hash) return null;
   if (reserved.from_position_id && reserved.from_position_id !== parentPos.id) return null;

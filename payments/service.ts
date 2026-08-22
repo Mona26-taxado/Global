@@ -10,7 +10,16 @@ import {
 import { newId, readStore, withStore } from "@/lib/store";
 import { parsePaymentType } from "@/payments/payment-type";
 import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment, unpaidDirect2Funder } from "@/payments/plan-routing";
-import { activateReservedReentry, cycleComplete, currentPosition, positionsForPlan, reservedPosition } from "@/services/users";
+import {
+  activateReservedReentry,
+  assertRegistrationDidNotCreateGlobal,
+  cycleComplete,
+  currentPosition,
+  finalizeConfirmedDirect2Placement,
+  positionsForPlan,
+  reservedPosition,
+  voidUnpaidDirect2Provision,
+} from "@/services/users";
 import {
   hasConfirmedPlan,
   isPlanUnlocked,
@@ -90,7 +99,7 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
       globalParentUserId: null as string | null,
       positionId: null as string | null,
       notice:
-        "TESTNET. $5 registration always goes to the company address. Connect Wallet never creates this transfer.",
+        "TESTNET. $5 registration always goes to the company address. Connect Wallet never creates this transfer. Registration never creates a Global position.",
     };
   }
 
@@ -174,16 +183,24 @@ export async function confirmPayment(input: {
     if (existingEarly.payment_type === "GLOBAL_REENTRY") {
       await activateReservedReentry(input.userId, input.txHash, existingEarly.plan_id ?? input.planId);
     }
-    if (existingEarly.payment_type === "PLAN_PURCHASE" && existingEarly.position_id) {
+    if (existingEarly.payment_type === "PLAN_PURCHASE" && existingEarly.direct_number === 2) {
+      await finalizeConfirmedDirect2Placement(
+        input.userId,
+        existingEarly.plan_id ?? input.planId ?? "",
+        input.txHash,
+      );
+    } else if (existingEarly.payment_type === "PLAN_PURCHASE" && existingEarly.position_id) {
       await activateReservedIfDirect2Funded(existingEarly.position_id, input.txHash);
     }
     let registration = await getRegistration(input.userId);
     if (existingEarly.payment_type === "REGISTRATION" && registration && registration.status !== "ACTIVE") {
+      const idsBefore = new Set((await readStore()).network_positions.filter((p) => p.user_id === input.userId).map((p) => p.id));
       registration = await withStore((store) => {
         const reg = store.registrations.find((r) => r.user_id === input.userId)!;
         reg.status = "ACTIVE";
         reg.tx_hash = input.txHash;
         reg.activated_at = reg.activated_at ?? new Date().toISOString();
+        assertRegistrationDidNotCreateGlobal(store, input.userId, idsBefore);
         return reg;
       });
     }
@@ -274,17 +291,21 @@ export async function confirmPayment(input: {
     let registration = await getRegistration(input.userId);
     if (prepared.paymentType === "REGISTRATION") {
       registration = await withStore((store) => {
+        const idsBefore = new Set(store.network_positions.filter((p) => p.user_id === input.userId).map((p) => p.id));
         const reg = store.registrations.find((r) => r.user_id === input.userId)!;
         reg.status = "ACTIVE";
         reg.tx_hash = input.txHash;
         reg.activated_at = new Date().toISOString();
+        assertRegistrationDidNotCreateGlobal(store, input.userId, idsBefore);
         return reg;
       });
     }
     if (prepared.paymentType === "GLOBAL_REENTRY") {
       await activateReservedReentry(input.userId, input.txHash, "planId" in prepared ? prepared.planId : undefined);
     }
-    if (prepared.paymentType === "PLAN_PURCHASE" && "positionId" in prepared && prepared.positionId) {
+    if (prepared.paymentType === "PLAN_PURCHASE" && prepared.directNumber === 2) {
+      await finalizeConfirmedDirect2Placement(input.userId, prepared.planId, input.txHash);
+    } else if (prepared.paymentType === "PLAN_PURCHASE" && "positionId" in prepared && prepared.positionId) {
       await activateReservedIfDirect2Funded(prepared.positionId, input.txHash);
     }
     return { transaction, registration };
@@ -305,6 +326,15 @@ export async function confirmPayment(input: {
         }
       }
     });
+    if (
+      !pending &&
+      prepared.paymentType === "PLAN_PURCHASE" &&
+      "directNumber" in prepared &&
+      prepared.directNumber === 2 &&
+      "planId" in prepared
+    ) {
+      await voidUnpaidDirect2Provision(input.userId, prepared.planId);
+    }
     throw error;
   }
 }

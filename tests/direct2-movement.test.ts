@@ -9,8 +9,10 @@ import {
   assignSponsor,
   createUser,
   currentPosition,
+  finalizeConfirmedDirect2Placement,
   placeUser,
   reservedPosition,
+  voidUnpaidDirect2Provision,
 } from "../services/users";
 import { newId, readStore, withStore } from "../lib/store";
 import { activeChainId } from "../lib/network-config";
@@ -172,18 +174,21 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     expect(store.network_positions.filter((p) => p.user_id === "user_new")).toHaveLength(0);
   });
 
-  it("2. Direct #1 still pays the sponsor wallet", async () => {
+  it("2. Direct #1 still pays the sponsor wallet and does not place Global", async () => {
     await member("user_s", "GXSPONSOR", ADDR.A);
     await member("user_d1", "GXDIRECT1", ADDR.B);
-    await confirmPlan("user_s", ADDR.A);
     await assignSponsor("user_d1", "GXSPONSOR");
-    const pay = await resolvePlanRecipient("user_d1", "PLAN_100");
-    expect(pay.slot).toBe(1);
-    expect(pay.recipientRole).toBe("SPONSOR");
-    expect(pay.recipientUserId).toBe("user_s");
-    expect(pay.recipient.toLowerCase()).toBe(ADDR.A);
-    expect(pay.positionId).toBeUndefined();
-    expect(currentPosition((await readStore()).network_positions, "user_s")).toBeNull();
+    for (const plan of ["PLAN_100", "PLAN_200", "PLAN_500", "PLAN_1000"] as const) {
+      await confirmPlan("user_s", ADDR.A, plan);
+      const pay = await resolvePlanRecipient("user_d1", plan);
+      expect(pay.slot).toBe(1);
+      expect(pay.recipientRole).toBe("SPONSOR");
+      expect(pay.recipientUserId).toBe("user_s");
+      expect(pay.positionId).toBeUndefined();
+      expect(currentPosition((await readStore()).network_positions, "user_s", plan)).toBeNull();
+      expect(reservedPosition((await readStore()).network_positions, "user_s", plan)).toBeNull();
+      await confirmPlan("user_d1", ADDR.B, plan);
+    }
   });
 
   it("3–7. Direct #2 that completes a cycle reserves first, pays the new parent, no extra re-entry, fail/retry/success", async () => {
@@ -215,6 +220,8 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     expect(pay.recipient.toLowerCase()).not.toBe(ADDR.ROOT);
 
     store = await readStore();
+    expect(currentPosition(store.network_positions, "user_right", "PLAN_100")).toBeNull();
+    expect(reservedPosition(store.network_positions, "user_right", "PLAN_100")?.status).toBe("RESERVED");
     const reserved = reservedPosition(store.network_positions, "user_root", "PLAN_100");
     expect(reserved?.status).toBe("RESERVED");
     expect(reserved?.funded_by_user_id).toBe("user_payer");
@@ -237,8 +244,9 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.id).toBe(beforeRoot?.id);
     expect(reservedPosition(store.network_positions, "user_root", "PLAN_100")?.status).toBe("RESERVED");
 
-    await activateReservedReentry("user_root", "0xdirect2verify", "PLAN_100");
+    await finalizeConfirmedDirect2Placement("user_payer", "PLAN_100", "0xdirect2verify");
     store = await readStore();
+    expect(currentPosition(store.network_positions, "user_right", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
     expect(store.network_positions.find((p) => p.id === beforeRoot?.id)?.status).toBe("HISTORY");
     expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.id).toBe(reserved?.id);
     expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
@@ -334,6 +342,86 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     const reserved = reservedPosition((await readStore()).network_positions, "user_root", "PLAN_ADMIN");
     expect(reserved?.plan_id).toBe("PLAN_ADMIN");
     expect(reserved?.funded_by_user_id).toBe("user_payer");
+  });
+
+  it("Direct #2 PREPARE only: no confirmed plan tx and no ACTIVE Global seat", async () => {
+    await member("user_root", "GXROOTAA", ADDR.ROOT);
+    await member("user_s", "GXSPONSOR", ADDR.A);
+    await member("user_d1", "GXDIRECT1", ADDR.B);
+    await member("user_d2", "GXDIRECT2", ADDR.PAYER);
+    await confirmPlan("user_root", ADDR.ROOT);
+    await confirmPlan("user_s", ADDR.A);
+    await placeUser("user_root", "PLAN_100");
+    await assignSponsor("user_d1", "GXSPONSOR");
+    await assignSponsor("user_d2", "GXSPONSOR");
+
+    const pay = await resolvePlanRecipient("user_d2", "PLAN_100");
+    expect(pay.slot).toBe(2);
+    const store = await readStore();
+    expect(store.transactions.filter((t) => t.user_id === "user_d2" && t.plan_id === "PLAN_100")).toHaveLength(0);
+    expect(currentPosition(store.network_positions, "user_s", "PLAN_100")).toBeNull();
+    expect(reservedPosition(store.network_positions, "user_s", "PLAN_100")?.status).toBe("RESERVED");
+    expect(store.network_positions.filter((p) => p.user_id === "user_s" && (p.status ?? "ACTIVE") === "ACTIVE")).toHaveLength(0);
+  });
+
+  it("failed Direct #2: no ACTIVE placement", async () => {
+    await member("user_root", "GXROOTAA", ADDR.ROOT);
+    await member("user_s", "GXSPONSOR", ADDR.A);
+    await member("user_d1", "GXDIRECT1", ADDR.B);
+    await member("user_d2", "GXDIRECT2", ADDR.PAYER);
+    await confirmPlan("user_root", ADDR.ROOT);
+    await confirmPlan("user_s", ADDR.A);
+    await placeUser("user_root", "PLAN_100");
+    await assignSponsor("user_d1", "GXSPONSOR");
+    await assignSponsor("user_d2", "GXSPONSOR");
+    await resolvePlanRecipient("user_d2", "PLAN_100");
+    await withStore((store) => {
+      store.transactions.push({
+        id: newId("tx"),
+        user_id: "user_d2",
+        payer_wallet: ADDR.PAYER,
+        recipient_wallet: ADDR.ROOT,
+        amount: "100000000",
+        token: "USDT",
+        token_contract: "0x0000000000000000000000000000000000000001",
+        chain_id: activeChainId(),
+        tx_hash: "0xd2failed",
+        payment_type: "PLAN_PURCHASE",
+        plan_id: "PLAN_100",
+        plan_code: "PLAN_100",
+        status: "FAILED",
+        recipient_role: "GLOBAL_UPLINE",
+        routing_slot: 2,
+        direct_number: 2,
+        created_at: new Date().toISOString(),
+      });
+    });
+    await voidUnpaidDirect2Provision("user_d2", "PLAN_100");
+    const store = await readStore();
+    expect(store.transactions.find((t) => t.tx_hash === "0xd2failed")?.status).toBe("FAILED");
+    expect(currentPosition(store.network_positions, "user_s", "PLAN_100")).toBeNull();
+    expect(reservedPosition(store.network_positions, "user_s", "PLAN_100")).toBeNull();
+    expect(store.network_positions.filter((p) => p.user_id === "user_s" && (p.status ?? "ACTIVE") === "ACTIVE")).toHaveLength(0);
+  });
+
+  it("Direct #2 CONFIRMED: placement finalizes", async () => {
+    await member("user_root", "GXROOTAA", ADDR.ROOT);
+    await member("user_s", "GXSPONSOR", ADDR.A);
+    await member("user_d1", "GXDIRECT1", ADDR.B);
+    await member("user_d2", "GXDIRECT2", ADDR.PAYER);
+    await confirmPlan("user_root", ADDR.ROOT);
+    await confirmPlan("user_s", ADDR.A);
+    await placeUser("user_root", "PLAN_100");
+    await assignSponsor("user_d1", "GXSPONSOR");
+    await assignSponsor("user_d2", "GXSPONSOR");
+    await resolvePlanRecipient("user_d2", "PLAN_100");
+    await confirmPlan("user_d2", ADDR.PAYER);
+    await finalizeConfirmedDirect2Placement("user_d2", "PLAN_100", "seed_user_d2_PLAN_100");
+    const store = await readStore();
+    expect(currentPosition(store.network_positions, "user_s", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
+    expect(currentPosition(store.network_positions, "user_s", "PLAN_100")?.parent_id).toBe(
+      currentPosition(store.network_positions, "user_root", "PLAN_100")?.id,
+    );
   });
 
   it("12. existing CONFIRMED transactions are never rewritten by routing", async () => {

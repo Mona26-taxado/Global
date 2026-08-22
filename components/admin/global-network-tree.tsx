@@ -17,6 +17,7 @@ import { CopyButton, EmptyState, StatusBadge } from "@/components/ui/app-ui";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
+import { occupyingSeatsAfterEarlierHole, type Node as PlacementNode } from "@/network/placement";
 import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import { api, shortAddr } from "@/lib/utils";
@@ -176,6 +177,7 @@ function MemberCard({
   onSelect,
   showAsRoot,
   phase,
+  legacy,
 }: {
   placed: Placed;
   selected: boolean;
@@ -184,6 +186,7 @@ function MemberCard({
   onSelect: () => void;
   showAsRoot?: boolean;
   phase?: "now" | "next";
+  legacy?: boolean;
 }) {
   if (placed.vis.kind === "empty") {
     return (
@@ -229,6 +232,9 @@ function MemberCard({
         <div className="min-w-0">
           <p className="truncate font-mono text-[12px] font-semibold tracking-wide text-cream">{label}</p>
           {history && <p className="text-[9px] font-semibold uppercase tracking-wide text-mute">Was</p>}
+          {legacy && !history && !reserved && (
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-mute">Legacy</p>
+          )}
           {phase === "now" && !reserved && !history && <p className="text-[9px] font-semibold uppercase tracking-wide text-mint">Now</p>}
           {phase === "next" && <p className="text-[9px] font-semibold uppercase tracking-wide text-warning">Next</p>}
           {reserved && (
@@ -310,6 +316,17 @@ export function GlobalNetworkTree({
   const liveTree = useMemo(() => liveApiSeats(tree), [tree]);
   const allHistoryRows = useMemo(() => [...historyByUser.values()].flat(), [historyByUser]);
   const displayTree = useMemo(() => displayForestSeats(liveTree, allHistoryRows), [liveTree, allHistoryRows]);
+  const legacyIds = useMemo(() => {
+    const nodes: PlacementNode[] = displayTree.map((n) => ({
+      id: n.id,
+      user_id: n.user_id,
+      parent_id: n.parent_id,
+      position: n.position === "RIGHT" ? "RIGHT" : n.position === "LEFT" ? "LEFT" : null,
+      depth: n.depth,
+      status: n.status,
+    }));
+    return occupyingSeatsAfterEarlierHole(nodes);
+  }, [displayTree]);
   const activeRootUserIds = useMemo(
     () => new Set(liveTree.filter((n) => !n.parent_id && (n.status ?? "ACTIVE") === "ACTIVE").map((n) => n.user_id)),
     [liveTree],
@@ -567,6 +584,11 @@ export function GlobalNetworkTree({
           <p className="text-cream">{selectedNode.position ?? "ROOT"}</p>
           <p className="mt-2 text-secondary">Status</p>
           <StatusBadge status={statusOf(selectedNode)} />
+          {legacyIds.has(selectedNode.id) && (
+            <p className="mt-2 text-[11px] leading-snug text-mute">
+              Legacy placement — stored parent kept because the plan payment is already on this seat. Future empty seats still fill in BFS order (earlier holes first).
+            </p>
+          )}
           <p className="mt-2 text-secondary">Current cycle</p>
           <p className="text-cream">
             {reservedSelected ? "Re-entry reserved — payment required" : `${leftChild ? "LEFT filled" : "LEFT empty"} · ${rightChild ? "RIGHT filled" : "RIGHT empty"}`}
@@ -739,6 +761,11 @@ export function GlobalNetworkTree({
               <div className="mt-2">
                 <StatusBadge status={statusOf(selectedNode)} />
               </div>
+              {legacyIds.has(selectedNode.id) && (
+                <p className="mt-2 text-[11px] leading-snug text-mute">
+                  Legacy placement — stored parent kept. Future seats fill earlier empty holes first.
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-2">
               <div className="rounded-xl border border-line bg-[#0B1220] p-3">
@@ -897,6 +924,7 @@ export function GlobalNetworkTree({
                                   ? "now"
                                   : undefined
                           }
+                          legacy={Boolean(p.vis.node && legacyIds.has(p.vis.node.id))}
                         />
                       ))}
                     </div>

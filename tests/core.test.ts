@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { bothLegsFilled, cycleComplete, findPlacement, findReentryPlacement } from "../network/placement";
+import {
+  bothLegsFilled,
+  cycleComplete,
+  findPlacement,
+  findReentryPlacement,
+  occupyingSeatsAfterEarlierHole,
+} from "../network/placement";
+import { qualifyForReentryInStore } from "../services/users";
+import type { Store } from "../lib/store";
 import { amountToUnits } from "../payments/service";
 import { tokenPocketLoginParam } from "../wallet/tokenpocket/deeplink";
+import type { NetworkPositionRow } from "../types";
 
 describe("global placement (first empty LEFT then RIGHT)", () => {
   function push(
@@ -131,6 +140,37 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
+  it("X complete → next empty is Y.RIGHT (global BFS, not X's downline)", () => {
+    const nodes = [
+      { id: "pos-ROOT", user_id: "ROOT", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-X", user_id: "X", parent_id: "pos-ROOT", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-Y", user_id: "Y", parent_id: "pos-ROOT", position: "RIGHT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-A", user_id: "A", parent_id: "pos-X", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos-B", user_id: "B", parent_id: "pos-X", position: "RIGHT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos-C", user_id: "C", parent_id: "pos-Y", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+    ];
+    const hole = findReentryPlacement(nodes, "X");
+    expect(hole.parent_id).toBe("pos-Y");
+    expect(hole.position).toBe("RIGHT");
+  });
+
+  it("does not skip an earlier same-level empty after HISTORY parents drop out of live", () => {
+    const nodes = [
+      { id: "pos-root", user_id: "root", parent_id: null, position: null, depth: 0, status: "HISTORY" as const },
+      { id: "pos-e2", user_id: "e2", parent_id: "pos-root", position: "LEFT" as const, depth: 1, status: "HISTORY" as const },
+      { id: "pos-62", user_id: "r62", parent_id: "pos-root", position: "RIGHT" as const, depth: 1, status: "HISTORY" as const },
+      { id: "pos-282c", user_id: "n282c", parent_id: "pos-e2", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos-5a59", user_id: "n5a59", parent_id: "pos-e2", position: "RIGHT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos-a9a3", user_id: "na9a3", parent_id: "pos-62", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos-4836", user_id: "n4836", parent_id: "pos-62", position: "RIGHT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos-f76c", user_id: "nf76c", parent_id: "pos-282c", position: "LEFT" as const, depth: 3, status: "ACTIVE" as const },
+      { id: "pos-f768", user_id: "nf768", parent_id: "pos-a9a3", position: "LEFT" as const, depth: 3, status: "ACTIVE" as const },
+    ];
+    const hole = findPlacement(nodes, "NEXT");
+    expect(hole.parent_id).toBe("pos-282c");
+    expect(hole.position).toBe("RIGHT");
+  });
+
   it("cycle completes only with ACTIVE LEFT and RIGHT", () => {
     const both = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0 },
@@ -147,6 +187,82 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
     ];
     expect(bothLegsFilled(oneLegPlusDownline, "pos-A")).toBe(false);
     expect(cycleComplete(oneLegPlusDownline, "pos-A")).toBe(false);
+  });
+
+  it("PLAN_100 audit: 2575.RIGHT is first empty; GXH4QSGA under current e8e1.LEFT is legacy skip", () => {
+    const nodes = [
+      { id: "pos_user_6ed8e4893670db32", user_id: "u2575", parent_id: null, position: null, depth: 0, status: "HISTORY" as const },
+      { id: "pos_938a4b2c3b7e5eb6", user_id: "ue8e1", parent_id: "pos_user_6ed8e4893670db32", position: "LEFT" as const, depth: 1, status: "HISTORY" as const },
+      { id: "pos_a9e48adb3b386daa", user_id: "u99ab", parent_id: "pos_user_6ed8e4893670db32", position: "RIGHT" as const, depth: 1, status: "HISTORY" as const },
+      { id: "pos_4984565872461102", user_id: "u2575", parent_id: "pos_938a4b2c3b7e5eb6", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos_edbfffdce9cffb78", user_id: "u3026", parent_id: "pos_938a4b2c3b7e5eb6", position: "RIGHT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos_3d56d3a822d7ae2d", user_id: "ue8e1", parent_id: "pos_a9e48adb3b386daa", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos_283dd10ac9a937b2", user_id: "un628", parent_id: "pos_a9e48adb3b386daa", position: "RIGHT" as const, depth: 2, status: "ACTIVE" as const },
+      { id: "pos_20e6f7c9d55810f4", user_id: "u99ab", parent_id: "pos_4984565872461102", position: "LEFT" as const, depth: 3, status: "ACTIVE" as const },
+      { id: "pos_ad98381513d44897", user_id: "uffe0", parent_id: "pos_3d56d3a822d7ae2d", position: "LEFT" as const, depth: 3, status: "ACTIVE" as const },
+    ];
+    const hole = findPlacement(nodes, "NEXT");
+    expect(hole.parent_id).toBe("pos_4984565872461102");
+    expect(hole.position).toBe("RIGHT");
+    expect(occupyingSeatsAfterEarlierHole(nodes)).toEqual(new Set(["pos_ad98381513d44897"]));
+  });
+
+  it("simulate: ffe0 on 2575.RIGHT completes 2575; next empty is 3026.LEFT; 2575 RESERVED pays 3026 wallet", () => {
+    const plan = "PLAN_100";
+    const row = (
+      id: string,
+      user_id: string,
+      parent_id: string | null,
+      position: "LEFT" | "RIGHT" | null,
+      depth: number,
+      status: NetworkPositionRow["status"],
+    ): NetworkPositionRow => ({
+      id,
+      user_id,
+      plan_id: plan,
+      parent_id,
+      position,
+      depth,
+      cycle: Math.floor(depth / 2),
+      status,
+      started_at: "2026-08-21T12:00:00.000Z",
+    });
+    const store = {
+      network_positions: [
+        row("pos_root_h", "u2575", null, null, 0, "HISTORY"),
+        row("pos_e8e1_h", "ue8e1", "pos_root_h", "LEFT", 1, "HISTORY"),
+        row("pos_99ab_h", "u99ab", "pos_root_h", "RIGHT", 1, "HISTORY"),
+        row("pos_2575", "u2575", "pos_e8e1_h", "LEFT", 2, "ACTIVE"),
+        row("pos_3026", "u3026", "pos_e8e1_h", "RIGHT", 2, "ACTIVE"),
+        row("pos_e8e1", "ue8e1", "pos_99ab_h", "LEFT", 2, "ACTIVE"),
+        row("pos_n628", "un628", "pos_99ab_h", "RIGHT", 2, "ACTIVE"),
+        row("pos_99ab", "u99ab", "pos_2575", "LEFT", 3, "ACTIVE"),
+        row("pos_ffe0", "uffe0", "pos_2575", "RIGHT", 3, "ACTIVE"),
+      ],
+      wallets: [
+        {
+          id: "wal_3026",
+          user_id: "u3026",
+          address: "0xbd7509eb24b4f33e3da1310fd9bd3e44f9b23026",
+          wallet_type: "injected",
+          chain_id: 80002,
+          verified: true,
+          created_at: "2026-08-21T12:00:00.000Z",
+        },
+      ],
+      users: [],
+      plans: [{ id: plan }],
+    } as unknown as Store;
+    expect(cycleComplete(store.network_positions, "pos_2575")).toBe(true);
+    const next = findPlacement(store.network_positions, "u2575");
+    expect(next.parent_id).toBe("pos_3026");
+    expect(next.position).toBe("LEFT");
+    const reserved = qualifyForReentryInStore(store, "u2575", plan);
+    expect(reserved?.status).toBe("RESERVED");
+    expect(reserved?.parent_id).toBe("pos_3026");
+    expect(reserved?.position).toBe("LEFT");
+    expect(reserved?.recipient_user_id).toBe("u3026");
+    expect(reserved?.recipient_wallet).toBe("0xbd7509eb24b4f33e3da1310fd9bd3e44f9b23026");
   });
 
   it("RESERVED right child does not complete the cycle", () => {

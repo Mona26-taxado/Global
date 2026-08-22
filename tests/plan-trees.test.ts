@@ -11,6 +11,7 @@ import {
   placeUser,
   qualifyForReentry,
   reservedPosition,
+  finalizeConfirmedDirect2Placement,
 } from "../services/users";
 import { newId, readStore, withStore } from "../lib/store";
 import { isPlanUnlocked } from "../lib/plan-progress";
@@ -129,6 +130,7 @@ describe("plan-scoped Global trees", () => {
     const zPay = await resolvePlanRecipient("user_z", "P1");
     expect(zPay.slot).toBe(2);
     await confirmPlan("user_z", "Z", "P1");
+    await finalizeConfirmedDirect2Placement("user_z", "P1", "seed_user_z_P1");
 
     let store = await readStore();
     const p1Before = currentPosition(store.network_positions, "user_x", "P1");
@@ -151,6 +153,7 @@ describe("plan-scoped Global trees", () => {
     expect(ePay.slot).toBe(2);
     expect(ePay.globalParentUserId).toBeTruthy();
     await confirmPlan("user_z", "Z", "P2");
+    await finalizeConfirmedDirect2Placement("user_z", "P2", "seed_user_z_P2");
     store = await readStore();
     const p2Pos = currentPosition(store.network_positions, "user_x", "P2");
     expect(p2Pos).toBeTruthy();

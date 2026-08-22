@@ -12,6 +12,7 @@ import {
   placeUser,
   qualifyForReentry,
   reservedPosition,
+  finalizeConfirmedDirect2Placement,
 } from "../services/users";
 import { newId, readStore, withStore } from "../lib/store";
 import { activeChainId } from "../lib/network-config";
@@ -157,6 +158,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(zPay.recipientUserId).toBe("user_a");
     expect(zPay.globalParentUserId).toBe("user_a");
     expect(zPay.recipient.toLowerCase()).toBe(ADDR.A);
+    await finalizeConfirmedDirect2Placement("user_z", "PLAN_100", "0xzpay");
 
     let store = await readStore();
     expect(currentPosition(store.network_positions, "user_x")?.parent_id).toBe(
@@ -174,11 +176,14 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const cPay = await resolvePlanRecipient("user_c", "PLAN_100");
     expect(cPay.recipientUserId).toBe("user_x");
     expect(cPay.positionId).toBe(reservedPosition((await readStore()).network_positions, "user_a")?.id);
+    await finalizeConfirmedDirect2Placement("user_c", "PLAN_100", "0xcpay");
     store = await readStore();
-    expect(currentPosition(store.network_positions, "user_y")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_a")?.id,
-    );
-    expect(currentPosition(store.network_positions, "user_y")?.position).toBe("RIGHT");
+    const ySeat = currentPosition(store.network_positions, "user_y");
+    const aNow = currentPosition(store.network_positions, "user_a");
+    const yParent = store.network_positions.find((p) => p.id === ySeat?.parent_id);
+    expect(ySeat?.position).toBe("RIGHT");
+    expect(yParent?.user_id).toBe("user_a");
+    expect(aNow?.parent_id).toBe(currentPosition(store.network_positions, "user_x")?.id);
 
     await confirmPlan("user_z", "Z");
     const dRef = await assignSponsor("user_d", "GXDDDDDD");
@@ -189,12 +194,13 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     const eRef = await assignSponsor("user_e", "GXDDDDDD");
     expect(eRef.direct_number).toBe(2);
     const ePay = await resolvePlanRecipient("user_e", "PLAN_100");
-    expect(ePay.recipientUserId).toBe("user_x");
+    expect(ePay.recipientUserId).toBe("user_y");
+    await finalizeConfirmedDirect2Placement("user_e", "PLAN_100", "0xepay");
     store = await readStore();
-    expect(currentPosition(store.network_positions, "user_z")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_x")?.id,
-    );
-    expect(currentPosition(store.network_positions, "user_z")?.position).toBe("RIGHT");
+    const zSeat = currentPosition(store.network_positions, "user_z");
+    const zParent = store.network_positions.find((p) => p.id === zSeat?.parent_id);
+    expect(zSeat?.position).toBe("RIGHT");
+    expect(zParent?.user_id).toBe("user_x");
 
     expect(store.users.find((u) => u.id === "user_y")?.sponsor_id).toBe("user_x");
     expect(store.users.find((u) => u.id === "user_z")?.sponsor_id).toBe("user_x");
@@ -205,7 +211,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await expect(assignSponsor(extra.id, "GXBBBBBB")).rejects.toThrow(DIRECT_REFERRAL_LIMIT_REACHED);
 
     const again = await resolvePlanRecipient("user_z", "PLAN_100");
-    expect(again.recipientUserId).toBe("user_a");
+    expect(again.recipientUserId).toBe("user_y");
     expect(store.network_positions.filter((p) => p.user_id === "user_x" && (p.status ?? "ACTIVE") === "ACTIVE")).toHaveLength(1);
 
     expect(yPay.recipientUserId).toBe("user_x");
@@ -213,7 +219,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(bPay.recipientUserId).toBe("user_y");
     expect(cPay.recipientUserId).toBe("user_x");
     expect(dPay.recipientUserId).toBe("user_z");
-    expect(ePay.recipientUserId).toBe("user_x");
+    expect(ePay.recipientUserId).toBe("user_y");
   });
 
   it("reserves A under X then X under Y after paid rotation", async () => {

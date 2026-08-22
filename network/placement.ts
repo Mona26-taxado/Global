@@ -57,27 +57,67 @@ function makeHole(current: Node, position: "LEFT" | "RIGHT", userId: string): Ho
 }
 
 /**
- * First empty Global seat: top → bottom, LEFT before RIGHT.
- * Max 2 children per position. ACTIVE + RESERVED occupy; HISTORY does not.
- * Used for Direct #2 first entry and paid re-entry.
+ * First empty Global seat: top → bottom, LEFT before RIGHT, whole plan tree.
+ * Walk HISTORY for BFS order only. Holes attach under ACTIVE/RESERVED.
+ * ACTIVE + RESERVED occupy; HISTORY does not.
  */
 export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {
-  const live = liveNodes(nodes);
-  if (live.length === 0) {
+  const occupying = liveNodes(nodes);
+  if (occupying.length === 0) {
     return { id: `pos_${userId}`, user_id: userId, parent_id: null, position: null, depth: 0 };
   }
-  const byParent = childMap(live);
-  const roots = placementRoots(live);
+  const byOcc = childMap(occupying);
+  const byAll = childMap(nodes);
+  const roots = placementRoots(nodes);
   if (!roots.length) throw new Error("NETWORK_CORRUPT");
   const queue = [...roots];
+  const seen = new Set<string>();
   while (queue.length) {
     const current = queue.shift()!;
-    const kids = byParent.get(current.id) ?? {};
-    if (!kids.left) return makeHole(current, "LEFT", userId);
-    if (!kids.right) return makeHole(current, "RIGHT", userId);
-    queue.push(kids.left, kids.right);
+    if (seen.has(current.id)) continue;
+    seen.add(current.id);
+    if (occupiesSlot(current)) {
+      const kids = byOcc.get(current.id) ?? {};
+      if (!kids.left) return makeHole(current, "LEFT", userId);
+      if (!kids.right) return makeHole(current, "RIGHT", userId);
+    }
+    const walk = byAll.get(current.id) ?? {};
+    if (walk.left) queue.push(walk.left);
+    if (walk.right) queue.push(walk.right);
   }
   throw new Error("NETWORK_FULL_UNEXPECTED");
+}
+
+/**
+ * Occupying seats that sit after an earlier empty hole in BFS order.
+ * Display-only: do not rewrite those rows if their plan payment is CONFIRMED.
+ */
+export function occupyingSeatsAfterEarlierHole(nodes: Node[]): Set<string> {
+  const occupying = liveNodes(nodes);
+  if (occupying.length === 0) return new Set();
+  const byOcc = childMap(occupying);
+  const byAll = childMap(nodes);
+  const roots = placementRoots(nodes);
+  const queue = [...roots];
+  const seen = new Set<string>();
+  const legacy = new Set<string>();
+  let holeSeen = false;
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (seen.has(current.id)) continue;
+    seen.add(current.id);
+    if (occupiesSlot(current)) {
+      const kids = byOcc.get(current.id) ?? {};
+      if (!kids.left) holeSeen = true;
+      else if (holeSeen) legacy.add(kids.left.id);
+      if (!kids.right) holeSeen = true;
+      else if (holeSeen) legacy.add(kids.right.id);
+    }
+    const walk = byAll.get(current.id) ?? {};
+    if (walk.left) queue.push(walk.left);
+    if (walk.right) queue.push(walk.right);
+  }
+  return legacy;
 }
 
 export const findPlacement = findFirstEmptyPlacement;

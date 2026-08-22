@@ -1,4 +1,4 @@
-import { cycleComplete, findFirstEmptyPlacement, liveNodes } from "@/network/placement";
+import { bothLegsFilled, cycleComplete, findFirstEmptyPlacement, liveNodes } from "@/network/placement";
 import { makeReferralCode, newId, readStore, supabaseEnabled, withStore } from "@/lib/store";
 import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
@@ -38,6 +38,11 @@ export function reservedPosition(positions: NetworkPositionRow[], userId: string
       (p) => p.user_id === userId && (planId ? p.plan_id === planId : true) && p.status === "RESERVED",
     ) ?? null
   );
+}
+
+/** Current Global seat that occupies a slot (ACTIVE, else unpaid RESERVED snapshot). */
+export function occupyingPosition(positions: NetworkPositionRow[], userId: string, planId?: string) {
+  return currentPosition(positions, userId, planId) ?? reservedPosition(positions, userId, planId);
 }
 
 function resolvePlanId(store: StoreShape, planId?: string) {
@@ -145,8 +150,11 @@ function insertPosition(
     plan_id: string;
   },
 ): NetworkPositionRow {
-  const live = activePositions(store.network_positions, extra.plan_id);
-  const placement = findFirstEmptyPlacement(live, userId);
+  if (extra.status === "ACTIVE" && extra.funded_by_user_id) {
+    throw new Error("DIRECT2_MUST_NOT_INSERT_ACTIVE");
+  }
+  const scoped = positionsForPlan(store.network_positions, extra.plan_id);
+  const placement = findFirstEmptyPlacement(scoped, userId);
   const started = extra.started_at ?? (extra.status === "ACTIVE" ? nowIso() : null);
   const row: NetworkPositionRow = {
     id: newId("pos"),
@@ -184,13 +192,20 @@ function verifiedWalletAddress(store: StoreShape, userId: string | null) {
   return w?.address?.toLowerCase() ?? null;
 }
 
-export function qualifyForReentryInStore(store: StoreShape, userId: string, planId?: string): NetworkPositionRow | null {
+export function qualifyForReentryInStore(
+  store: StoreShape,
+  userId: string,
+  planId?: string,
+  opts?: { occupyingOk?: boolean },
+): NetworkPositionRow | null {
   const plan = resolvePlanId(store, planId ?? currentPosition(store.network_positions, userId)?.plan_id);
   const already = reservedPosition(store.network_positions, userId, plan);
   if (already) return already;
   const current = currentPosition(store.network_positions, userId, plan);
   if (!current) return null;
-  if (!cycleComplete(positionsForPlan(store.network_positions, plan), current.id)) return current;
+  const scoped = positionsForPlan(store.network_positions, plan);
+  const complete = opts?.occupyingOk ? bothLegsFilled(scoped, current.id) : cycleComplete(scoped, current.id);
+  if (!complete) return current;
   const reserved = insertPosition(store, userId, {
     status: "RESERVED",
     plan_id: plan,
@@ -222,17 +237,95 @@ export function activateReservedReentryInStore(store: StoreShape, userId: string
   return reserved;
 }
 
-function maybeReenterAncestors(store: StoreShape, child: NetworkPositionRow) {
+function maybeReenterAncestors(store: StoreShape, child: NetworkPositionRow, occupyingOk = false) {
   let parentId = child.parent_id;
   while (parentId) {
     const parentPos = store.network_positions.find((p) => p.id === parentId);
     if (!parentPos) return;
     if ((parentPos.status ?? "ACTIVE") === "ACTIVE") {
-      if (cycleComplete(positionsForPlan(store.network_positions, child.plan_id), parentPos.id)) {
-        qualifyForReentryInStore(store, parentPos.user_id, child.plan_id);
+      const scoped = positionsForPlan(store.network_positions, child.plan_id);
+      const complete = occupyingOk ? bothLegsFilled(scoped, parentPos.id) : cycleComplete(scoped, parentPos.id);
+      if (complete) {
+        qualifyForReentryInStore(store, parentPos.user_id, child.plan_id, occupyingOk ? { occupyingOk: true } : undefined);
       }
     }
     parentId = parentPos.parent_id;
+  }
+}
+
+function voidReservedSeat(row: NetworkPositionRow) {
+  row.status = "HISTORY";
+  row.ended_at = nowIso();
+}
+
+/** Direct #2 PREPARE: occupy first-empty as RESERVED. Never ACTIVE. */
+export function provisionDirect2SponsorInStore(
+  store: StoreShape,
+  sponsorId: string,
+  planId: string,
+  buyerId: string,
+): NetworkPositionRow {
+  const plan = resolvePlanId(store, planId);
+  const existingActive = currentPosition(store.network_positions, sponsorId, plan);
+  if (existingActive) {
+    maybeReenterAncestors(store, existingActive, true);
+    return existingActive;
+  }
+  const existingReserved = reservedPosition(store.network_positions, sponsorId, plan);
+  if (existingReserved) {
+    if (!existingReserved.funded_by_user_id) existingReserved.funded_by_user_id = buyerId;
+    maybeReenterAncestors(store, existingReserved, true);
+    return existingReserved;
+  }
+  const row = insertPosition(store, sponsorId, {
+    status: "RESERVED",
+    plan_id: plan,
+    funded_by_user_id: buyerId,
+    reentry_tx_hash: null,
+  });
+  if ((row.status ?? "ACTIVE") === "ACTIVE") {
+    throw new Error("DIRECT2_PREPARE_MUST_NOT_ACTIVATE");
+  }
+  maybeReenterAncestors(store, row, true);
+  return row;
+}
+
+/** After CONFIRMED Direct #2 plan transfer: activate sponsor snapshot, then any funded cycle movement. */
+export function finalizeConfirmedDirect2InStore(store: StoreShape, buyerId: string, planId: string, txHash: string) {
+  const buyer = store.users.find((u) => u.id === buyerId);
+  if (!buyer?.sponsor_id) return;
+  const plan = resolvePlanId(store, planId);
+  const sponsorReserved = reservedPosition(store.network_positions, buyer.sponsor_id, plan);
+  if (sponsorReserved && !sponsorReserved.from_position_id) {
+    activateReservedReentryInStore(store, buyer.sponsor_id, txHash, plan);
+  }
+  const movement = store.network_positions.find(
+    (p) =>
+      p.plan_id === plan &&
+      p.status === "RESERVED" &&
+      p.funded_by_user_id === buyerId &&
+      Boolean(p.from_position_id),
+  );
+  if (movement) {
+    activateReservedReentryInStore(store, movement.user_id, txHash, plan);
+  }
+}
+
+/** Failed/cancelled Direct #2: drop unpaid RESERVED snapshots. Never rewrite CONFIRMED txs. */
+export function voidUnpaidDirect2ProvisionInStore(store: StoreShape, buyerId: string, planId?: string) {
+  for (const row of store.network_positions) {
+    if (row.status !== "RESERVED") continue;
+    if (row.funded_by_user_id !== buyerId) continue;
+    if (row.reentry_tx_hash) continue;
+    if (planId && row.plan_id !== planId) continue;
+    voidReservedSeat(row);
+  }
+}
+
+export function assertRegistrationDidNotCreateGlobal(store: StoreShape, userId: string, positionIdsBefore: Set<string>) {
+  const added = store.network_positions.filter((p) => p.user_id === userId && !positionIdsBefore.has(p.id));
+  if (added.length) {
+    throw new Error("REGISTRATION_MUST_NOT_CREATE_GLOBAL");
   }
 }
 
@@ -257,6 +350,14 @@ export async function qualifyForReentry(userId: string, planId?: string): Promis
 
 export async function activateReservedReentry(userId: string, txHash: string, planId?: string) {
   return withStore((store) => activateReservedReentryInStore(store, userId, txHash, planId));
+}
+
+export async function finalizeConfirmedDirect2Placement(buyerId: string, planId: string, txHash: string) {
+  return withStore((store) => finalizeConfirmedDirect2InStore(store, buyerId, planId, txHash));
+}
+
+export async function voidUnpaidDirect2Provision(buyerId: string, planId?: string) {
+  return withStore((store) => voidUnpaidDirect2ProvisionInStore(store, buyerId, planId));
 }
 
 /** @deprecated use qualifyForReentry — kept name so existing callers reserve instead of free-moving. */

@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolvePlanRecipient } from "../payments/plan-routing";
-import { assignSponsor, createUser, currentPosition, placeUser } from "../services/users";
+import { assignSponsor, createUser, currentPosition, finalizeConfirmedDirect2Placement, placeUser, reservedPosition } from "../services/users";
 import { newId, readStore, withStore } from "../lib/store";
 import { activeChainId } from "../lib/network-config";
 
@@ -32,6 +32,48 @@ function emptyPayload() {
         active: true,
         enabled: true,
         sort_order: 1,
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "PLAN_200",
+        code: "PLAN_200",
+        name: "$200 PLAN",
+        amount_usd: 200,
+        token: "USDT",
+        network: "amoy",
+        description: "",
+        active: true,
+        enabled: true,
+        sort_order: 2,
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "PLAN_500",
+        code: "PLAN_500",
+        name: "$500 PLAN",
+        amount_usd: 500,
+        token: "USDT",
+        network: "amoy",
+        description: "",
+        active: true,
+        enabled: true,
+        sort_order: 3,
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "PLAN_1000",
+        code: "PLAN_1000",
+        name: "$1000 PLAN",
+        amount_usd: 1000,
+        token: "USDT",
+        network: "amoy",
+        description: "",
+        active: true,
+        enabled: true,
+        sort_order: 4,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
       },
@@ -111,13 +153,15 @@ describe("$5 registration does not enter Global", () => {
     else process.env.GLOBALX_DATA_PATH = previousPath;
   });
 
-  it("TEST A: registration ACTIVE leaves network_positions empty for that user", async () => {
+  it("$5 only => 0 Global positions for every plan", async () => {
     await member("user_new", "GXNEWUSR", BUYER);
     await confirmRegistration("user_new");
     const store = await readStore();
     expect(store.registrations.find((r) => r.user_id === "user_new")?.status).toBe("ACTIVE");
     expect(store.network_positions.filter((p) => p.user_id === "user_new")).toHaveLength(0);
-    expect(store.network_positions.filter((p) => p.status === "RESERVED" && p.user_id === "user_new")).toHaveLength(0);
+    for (const plan of ["PLAN_100", "PLAN_200", "PLAN_500", "PLAN_1000"]) {
+      expect(store.network_positions.filter((p) => p.user_id === "user_new" && p.plan_id === plan)).toHaveLength(0);
+    }
   });
 
   it("TEST B: Global placement runs only after qualifying plan Direct #2, and places the sponsor not the $5 registrant", async () => {
@@ -140,7 +184,15 @@ describe("$5 registration does not enter Global", () => {
     expect(pay.slot).toBe(2);
     expect(pay.recipientRole).toBe("GLOBAL_UPLINE");
 
-    const store = await readStore();
+    let store = await readStore();
+    expect(currentPosition(store.network_positions, "user_s")).toBeNull();
+    expect(reservedPosition(store.network_positions, "user_s")?.parent_id).toBe(
+      currentPosition(store.network_positions, "user_root")?.id,
+    );
+    expect(store.network_positions.filter((p) => p.user_id === "user_d2")).toHaveLength(0);
+
+    await finalizeConfirmedDirect2Placement("user_d2", "PLAN_100", "0xd2confirm");
+    store = await readStore();
     expect(currentPosition(store.network_positions, "user_s")?.parent_id).toBe(
       currentPosition(store.network_positions, "user_root")?.id,
     );

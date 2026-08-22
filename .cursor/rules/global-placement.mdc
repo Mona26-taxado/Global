@@ -1,0 +1,14 @@
+---
+description: $5 registration never creates Global seats; Direct #2 ACTIVE only after confirmed plan payment
+alwaysApply: true
+---
+
+# Global placement (permanent)
+
+- `$5` REGISTRATION CONFIRMED → account/registration ACTIVE only. `network_positions` created = **zero**. Never call `placeUser` / provision / finalize from registration.
+- Direct **#1** plan purchase → pay sponsor wallet only. Does **not** place the sponsor in Global.
+- Direct **#2** PREPARE may RESERVE a snapshot for recipient routing. Must **not** create an ACTIVE Global seat.
+- ACTIVE (or RESERVED→ACTIVE movement) only after Direct #2 plan transfer is blockchain **CONFIRMED**.
+- Failed / cancelled / unpaid Direct #2 → void unpaid `funded_by` RESERVED seats; **no new ACTIVE**.
+- Same rules for PLAN_100 / PLAN_200 / PLAN_500 / PLAN_1000 and future plans.
+- Do not rewrite confirmed txs, referrals, allocator, chain verify, or Mainnet settings.
