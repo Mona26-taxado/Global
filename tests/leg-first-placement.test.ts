@@ -344,6 +344,43 @@ describe("level-order Global allocator", () => {
     expect(quote.recipient_wallet).toBe("0xd77ec55eb56ace50456515f018b82a6de187e8e1");
   });
 
+  it.each(PLANS)("%s lock: A at 2575.RIGHT completes 2575; C pays e727 not 3026", (plan) => {
+    const hist3026 = `${plan}-hist-3026`;
+    const n2575 = `${plan}-2575`;
+    const ne727 = `${plan}-e727`;
+    const nffe0 = `${plan}-ffe0`;
+    const n3026live = `${plan}-3026`;
+    const store = storeFor(plan, [
+      { id: hist3026, user_id: "u3026", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "HISTORY", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: n2575, user_id: "u2575", plan_id: plan, parent_id: hist3026, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: ne727, user_id: "ue727", plan_id: plan, parent_id: hist3026, position: "RIGHT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: nffe0, user_id: "uffe0", plan_id: plan, parent_id: n2575, position: "LEFT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: n3026live, user_id: "u3026", plan_id: plan, parent_id: nffe0, position: "LEFT", depth: 3, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+    ]);
+    store.users.push(
+      { id: "u2575", referral_code: "GXGLOBAL", sponsor_id: null, is_demo: false, display_name: "2575", created_at: "2026-08-22T00:00:00.000Z" },
+      { id: "ue727", referral_code: "GXHRCA9U", sponsor_id: null, is_demo: false, display_name: "e727", created_at: "2026-08-22T00:00:00.000Z" },
+      { id: "u3026", referral_code: "GXPT4XLX", sponsor_id: null, is_demo: false, display_name: "3026", created_at: "2026-08-22T00:00:00.000Z" },
+      { id: "uffe0", referral_code: "GXH4QSGA", sponsor_id: null, is_demo: false, display_name: "ffe0", created_at: "2026-08-22T00:00:00.000Z" },
+    );
+    store.wallets.push(
+      { id: "w-2575", user_id: "u2575", address: "0x4c914838613a605b1ef256816c1ac8912c172575", wallet_type: "injected", chain_id: 80002, verified: true, created_at: "2026-08-22T00:00:00.000Z" },
+      { id: "w-e727", user_id: "ue727", address: "0xa11dbd434aed4fd03cdc79345295687c8c06e727", wallet_type: "injected", chain_id: 80002, verified: true, created_at: "2026-08-22T00:00:00.000Z" },
+      { id: "w-3026", user_id: "u3026", address: "0xbd7509eb24b4f33e3da1310fd9bd3e44f9b23026", wallet_type: "injected", chain_id: 80002, verified: true, created_at: "2026-08-22T00:00:00.000Z" },
+    );
+    const hole = findFirstEmptyPlacement(store.network_positions.filter((p) => p.plan_id === plan), "u-sx");
+    expect(hole.parent_id).toBe(n2575);
+    expect(hole.position).toBe("RIGHT");
+    const quoted = quoteDirect2InStore(store, "u-sx", plan, "u-bx");
+    expect(quoted.candidate_parent_position_id).toBe(n2575);
+    expect(quoted.candidate_position).toBe("RIGHT");
+    expect(quoted.movement_user_id).toBe("u2575");
+    expect(quoted.movement_parent_position_id).toBe(ne727);
+    expect(quoted.movement_position).toBe("LEFT");
+    expect(intentPayee(quoted).toLowerCase()).toBe("0xa11dbd434aed4fd03cdc79345295687c8c06e727");
+    expect(intentPayee(quoted).toLowerCase()).not.toBe("0xbd7509eb24b4f33e3da1310fd9bd3e44f9b23026");
+  });
+
   it("pending stale quote with tx_hash null can be invalidated safely", () => {
     const store = storeFor("PLAN_200", [
       { id: "root", user_id: "u-root", plan_id: "PLAN_200", parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
