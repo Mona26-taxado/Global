@@ -255,6 +255,68 @@ export function layoutForestRoots(tree: NetNode[]): NetNode[] {
   return liveForestRoots(tree).filter((n) => !displacedIds.has(n.id) && !underDisplacedHistory(tree, n, displacedIds));
 }
 
+function occupyingLive(n: NetNode) {
+  const st = n.status ?? "ACTIVE";
+  return st === "ACTIVE" || st === "RESERVED";
+}
+
+/** Current occupying seat per user (ACTIVE wins over RESERVED). Display-only. */
+export function currentOccupyingByUser(live: NetNode[]): Map<string, NetNode> {
+  const m = new Map<string, NetNode>();
+  for (const n of live) {
+    if (!occupyingLive(n)) continue;
+    const prev = m.get(n.user_id);
+    if (!prev) {
+      m.set(n.user_id, n);
+      continue;
+    }
+    if ((prev.status ?? "ACTIVE") === "RESERVED" && (n.status ?? "ACTIVE") === "ACTIVE") m.set(n.user_id, n);
+  }
+  return m;
+}
+
+/**
+ * Canvas seats: ACTIVE + RESERVED only. If stored parent is HISTORY, hang the child
+ * under that member's current occupying seat (same LEFT/RIGHT). Single live apex.
+ * Does not rewrite stored rows.
+ */
+export function binaryPyramidSeats(live: NetNode[], all: NetNode[]): NetNode[] {
+  const occupying = live.filter(occupyingLive).map((n) => ({ ...n }));
+  const byId = new Map(all.map((n) => [n.id, n]));
+  const liveIds = new Set(occupying.map((n) => n.id));
+  const current = currentOccupyingByUser(occupying);
+  const remapped = occupying.map((n) => {
+    if (!n.parent_id || liveIds.has(n.parent_id)) return n;
+    const storedParent = byId.get(n.parent_id);
+    if (!storedParent) return { ...n, parent_id: null };
+    const host = current.get(storedParent.user_id);
+    if (host && host.id !== n.id) return { ...n, parent_id: host.id };
+    return { ...n, parent_id: null };
+  });
+  const ids = new Set(remapped.map((n) => n.id));
+  const apex = remapped
+    .filter((n) => !n.parent_id || !ids.has(n.parent_id))
+    .sort((a, b) => {
+      const ar = (a.status ?? "ACTIVE") === "ACTIVE" && !a.parent_id ? 0 : 1;
+      const br = (b.status ?? "ACTIVE") === "ACTIVE" && !b.parent_id ? 0 : 1;
+      return ar - br || a.depth - b.depth || a.id.localeCompare(b.id);
+    })[0];
+  if (!apex) return remapped;
+  const byParent = childSlotsByParent(remapped);
+  const keep = new Set<string>([apex.id]);
+  const queue = [apex.id];
+  while (queue.length) {
+    const id = queue.shift()!;
+    const kids = byParent.get(id) ?? {};
+    for (const child of [kids.left, kids.right]) {
+      if (!child || keep.has(child.id)) continue;
+      keep.add(child.id);
+      queue.push(child.id);
+    }
+  }
+  return remapped.filter((n) => keep.has(n.id));
+}
+
 /** HISTORY seats behind a live node, oldest first. Uses stored from_position_id only — never invents rows. */
 export function previousHistoryChain(
   live: Pick<NetNode, "id" | "from_position_id">,
