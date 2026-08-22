@@ -26,6 +26,11 @@ const ADDR: Record<string, `0x${string}`> = {
   A: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   L: "0x1111111111111111111111111111111111111111",
   R: "0x2222222222222222222222222222222222222222",
+  B: "0xbbbb00000000000000000000000000000000000b",
+  D: "0xdddd00000000000000000000000000000000000d",
+  E: "0xeeee00000000000000000000000000000000000e",
+  F: "0xffff00000000000000000000000000000000000f",
+  G: "0x9999000000000000000000000000000000000009",
 };
 
 function emptyPayload() {
@@ -299,5 +304,43 @@ describe("plan-scoped Global trees", () => {
     const views = await listUserPlans("user_x");
     expect(views.find((p) => p.id === "P3")?.status).toBe("AVAILABLE");
     expect(views.find((p) => p.id === "P3")?.global_status).toBe("AVAILABLE");
+  });
+
+  it("B waits because E missing P2, while D independently qualifies through F+G and enters P2 Global", async () => {
+    await member("user_b", "GXBBBBBB", "B");
+    await member("user_d", "GXDDDDDD", "D");
+    await member("user_e", "GXEEEEEE", "E");
+    await member("user_f", "GXFFFFFF", "F");
+    await member("user_g", "GXGGGGGG", "G");
+    for (const [id, label] of [
+      ["user_b", "B"],
+      ["user_d", "D"],
+      ["user_e", "E"],
+      ["user_f", "F"],
+      ["user_g", "G"],
+    ] as const) {
+      await confirmPlan(id, label, "P1");
+    }
+    await assignSponsor("user_d", "GXBBBBBB");
+    await assignSponsor("user_e", "GXBBBBBB");
+    await assignSponsor("user_f", "GXDDDDDD");
+    await assignSponsor("user_g", "GXDDDDDD");
+    await confirmPlan("user_b", "B", "P2");
+    await confirmPlan("user_d", "D", "P2");
+    await confirmPlan("user_f", "F", "P2");
+
+    expect((await listUserPlans("user_b")).find((p) => p.id === "P2")?.global_status).toBe("ACTIVE_WAITING_FOR_DIRECTS");
+    expect(currentPosition((await readStore()).network_positions, "user_b", "P2")).toBeNull();
+
+    const gPay = await resolvePlanRecipient("user_g", "P2");
+    expect(gPay.slot).toBe(2);
+    await confirmPlan("user_g", "G", "P2");
+    await finalizeConfirmedDirect2Placement("user_g", "P2", "seed_user_g_P2");
+
+    const store = await readStore();
+    expect(currentPosition(store.network_positions, "user_d", "P2")?.plan_id).toBe("P2");
+    expect(currentPosition(store.network_positions, "user_b", "P2")).toBeNull();
+    expect((await listUserPlans("user_b")).find((p) => p.id === "P2")?.global_status).toBe("ACTIVE_WAITING_FOR_DIRECTS");
+    expect((await listUserPlans("user_d")).find((p) => p.id === "P2")?.global_status).toBe("GLOBAL_ACTIVE");
   });
 });

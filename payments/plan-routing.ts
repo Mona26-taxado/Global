@@ -13,7 +13,7 @@ import {
   qualifyForReentry,
   reservedPosition,
 } from "@/services/users";
-import { isPlanUnlocked, qualifiesForPlanGlobal, basePlan } from "@/lib/plan-progress";
+import { isPlanUnlocked, qualifiesForPlanGlobal } from "@/lib/plan-progress";
 import type { NetworkPositionRow, ReferralRow } from "@/types";
 
 export class PlanRoutingError extends Error {
@@ -197,14 +197,13 @@ export async function resolvePlanRecipient(buyerId: string, planId: string): Pro
     };
   }
 
-  await ensureCompanyRoot(planId);
-  const isBase = basePlan(store.plans)?.id === planId;
-  if (!isBase && !qualifiesForPlanGlobal(store, sponsor.id, planId, buyer.id)) {
+  if (!qualifiesForPlanGlobal(store, sponsor.id, planId, buyer.id)) {
     throw new PlanRoutingError(
       "WAITING_FOR_DIRECT_UPGRADES",
       "Your sponsor is waiting for both existing directs to activate this plan before Global placement in this plan tree.",
     );
   }
+  await ensureCompanyRoot(planId);
   const placed = await withStore((store) => provisionDirect2SponsorInStore(store, sponsor.id, planId, buyerId));
   const afterPlace = await readStore();
   const reservedForThisEvent = movementReservedByPlacement(

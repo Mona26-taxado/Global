@@ -36,6 +36,19 @@ export function sponsorDirects(referrals: ReferralRow[], sponsorId: string) {
     .sort((a, b) => (a.direct_number ?? 9) - (b.direct_number ?? 9));
 }
 
+/** Permanent Direct #1 and Direct #2 only. Does not inspect sponsor/upline/ancestors. */
+export function permanentDirects(referrals: ReferralRow[], sponsorId: string) {
+  const rows = sponsorDirects(referrals, sponsorId);
+  const direct1 = rows.find((d) => d.direct_number === 1) ?? rows[0];
+  const direct2 = rows.find((d) => d.direct_number === 2) ?? rows[1];
+  return { direct1, direct2 };
+}
+
+/**
+ * Global qualification is local to `userId` for every plan P (including PLAN_100):
+ * user has CONFIRMED P, and permanent Direct #1 and Direct #2 have CONFIRMED P
+ * (or the in-flight Direct #2 buyer). Sponsor/upline Global state is not required.
+ */
 export function qualifiesForPlanGlobal(
   store: {
     transactions: TransactionRow[];
@@ -45,13 +58,11 @@ export function qualifiesForPlanGlobal(
   planId: string,
   pendingBuyerId?: string,
 ) {
-  if (!hasConfirmedPlan(store.transactions, userId, planId) && userId !== pendingBuyerId) return false;
   if (!hasConfirmedPlan(store.transactions, userId, planId)) return false;
-  const directs = sponsorDirects(store.referrals, userId);
-  if (directs.length < 2) return false;
-  return directs.every(
-    (d) => hasConfirmedPlan(store.transactions, d.user_id, planId) || d.user_id === pendingBuyerId,
-  );
+  const { direct1, direct2 } = permanentDirects(store.referrals, userId);
+  if (!direct1 || !direct2) return false;
+  const ok = (id: string) => hasConfirmedPlan(store.transactions, id, planId) || id === pendingBuyerId;
+  return ok(direct1.user_id) && ok(direct2.user_id);
 }
 
 export type PlanViewState =

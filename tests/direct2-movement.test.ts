@@ -205,6 +205,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
 
     await assignSponsor("user_right_d1", "GXRIGHTA");
     await assignSponsor("user_payer", "GXRIGHTA");
+    await confirmPlan("user_right_d1", ADDR.C);
 
     let store = await readStore();
     const beforeRoot = currentPosition(store.network_positions, "user_root", "PLAN_100");
@@ -354,6 +355,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await placeUser("user_root", "PLAN_100");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
+    await confirmPlan("user_d1", ADDR.B);
 
     const pay = await resolvePlanRecipient("user_d2", "PLAN_100");
     expect(pay.slot).toBe(2);
@@ -374,6 +376,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await placeUser("user_root", "PLAN_100");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
+    await confirmPlan("user_d1", ADDR.B);
     await resolvePlanRecipient("user_d2", "PLAN_100");
     await withStore((store) => {
       store.transactions.push({
@@ -414,6 +417,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await placeUser("user_root", "PLAN_100");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
+    await confirmPlan("user_d1", ADDR.B);
     await resolvePlanRecipient("user_d2", "PLAN_100");
     await confirmPlan("user_d2", ADDR.PAYER);
     await finalizeConfirmedDirect2Placement("user_d2", "PLAN_100", "seed_user_d2_PLAN_100");

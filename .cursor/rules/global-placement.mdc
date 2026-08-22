@@ -11,4 +11,5 @@ alwaysApply: true
 - ACTIVE (or RESERVED→ACTIVE movement) only after Direct #2 plan transfer is blockchain **CONFIRMED**.
 - Failed / cancelled / unpaid Direct #2 → void unpaid `funded_by` RESERVED seats; **no new ACTIVE**.
 - Same rules for PLAN_100 / PLAN_200 / PLAN_500 / PLAN_1000 and future plans.
+- Global qualification is local to each user on every plan including PLAN_100: CONFIRMED plan P + permanent Direct #1 P + Direct #2 P. Do not require sponsor/upline to be qualified or ACTIVE in P Global, or ancestor progression.
 - Do not rewrite confirmed txs, referrals, allocator, chain verify, or Mainnet settings.

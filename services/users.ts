@@ -4,6 +4,15 @@ import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
 import { basePlan } from "@/lib/plan-progress";
 
+/** Idempotent ACTIVE first-empty seat. Does not create transactions. Skips if ACTIVE or RESERVED already occupies. */
+export function ensureActivePlanSeatInStore(store: StoreShape, userId: string, planId: string) {
+  const occupying = occupyingPosition(store.network_positions, userId, planId);
+  if (occupying) return { row: occupying, created: false };
+  const row = insertActivePosition(store, userId, planId);
+  maybeReenterAncestors(store, row);
+  return { row, created: true };
+}
+
 export { bothLegsFilled, cycleComplete } from "@/network/placement";
 export const DIRECT_REFERRAL_LIMIT = 2;
 export const DIRECT_REFERRAL_LIMIT_REACHED = "DIRECT_REFERRAL_LIMIT_REACHED";
