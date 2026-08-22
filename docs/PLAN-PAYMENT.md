@@ -20,7 +20,7 @@ Y pays $100. Backend sets the ERC-20 recipient to **X’s verified wallet** (not
 
 X now has two directs on this plan. Z’s $100 does **not** go to X.
 
-1. Backend places **X** in the Global tree: ROOT.LEFT first, then that member’s immediate LEFT and RIGHT, then ROOT.RIGHT (unlocked permanently after a valid first-leg). Other parents fill LEFT then RIGHT. Same engine for every plan.
+1. Backend places **X** in the Global tree with the shared two-phase allocator (every plan_id): ROOT.LEFT, then that member’s immediate LEFT and RIGHT, then ROOT.RIGHT unlocks; after unlock, level-order LEFT to RIGHT. Same engine for every plan.
 2. Recipient = **X’s Global parent** (`parent_id` → that user’s verified wallet).
 3. If that parent wallet does not exist yet, Z **cannot Pay**. Nothing sits at the company “waiting”.
 

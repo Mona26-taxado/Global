@@ -70,41 +70,41 @@ describe("leg-first Global allocator", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("CASE 5: after ROOT.RIGHT is ACTIVE, complete that row before deeper LEFT-subtree holes", () => {
+  it.each(PLANS)("%s CASE 5: after ROOT.RIGHT unlocks, complete that row before deeper LEFT-subtree holes", (plan) => {
     const nodes = [
-      n("root", "ROOT", null, null, 0),
-      n("A", "A", "root", "LEFT", 1),
-      n("D", "D", "root", "RIGHT", 1),
-      n("B", "B", "A", "LEFT", 2),
-      n("C", "C", "A", "RIGHT", 2),
+      n(`${plan}-root`, "ROOT", null, null, 0),
+      n(`${plan}-A`, "A", `${plan}-root`, "LEFT", 1),
+      n(`${plan}-D`, "D", `${plan}-root`, "RIGHT", 1),
+      n(`${plan}-B`, "B", `${plan}-A`, "LEFT", 2),
+      n(`${plan}-C`, "C", `${plan}-A`, "RIGHT", 2),
     ];
     const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("D");
+    expect(hole.parent_id).toBe(`${plan}-D`);
     expect(hole.position).toBe("LEFT");
-    const withDL = [...nodes, n("DL", "DL", "D", "LEFT", 2)];
+    const withDL = [...nodes, n(`${plan}-DL`, "DL", `${plan}-D`, "LEFT", 2)];
     const next = holeOf(withDL);
-    expect(next.parent_id).toBe("D");
+    expect(next.parent_id).toBe(`${plan}-D`);
     expect(next.position).toBe("RIGHT");
-    const withBoth = [...withDL, n("DR", "DR", "D", "RIGHT", 2)];
+    const withBoth = [...withDL, n(`${plan}-DR`, "DR", `${plan}-D`, "RIGHT", 2)];
     const deeper = holeOf(withBoth);
-    expect(deeper.parent_id).toBe("B");
+    expect(deeper.parent_id).toBe(`${plan}-B`);
     expect(deeper.position).toBe("LEFT");
   });
 
-  it("CASE 5b: unlocked HISTORY left-head + ACTIVE ROOT.RIGHT → ROOT.RIGHT.LEFT before deeper 2575.LEFT", () => {
+  it.each(PLANS)("%s CASE 5b: unlocked HISTORY left-head + ACTIVE ROOT.RIGHT → ROOT.RIGHT.LEFT before deeper left-head.LEFT", (plan) => {
     const nodes = [
-      n("old-root", "u2575", null, null, 0, "HISTORY"),
-      n("old-left", "ue8e1", "old-root", "LEFT", 1, "HISTORY"),
-      n("n2575", "u2575", "old-left", "LEFT", 2),
-      n("nffe0", "uffe0", "old-left", "RIGHT", 2),
-      n("ne727", "ue727", "old-root", "RIGHT", 1),
+      n(`${plan}-old-root`, "u2575", null, null, 0, "HISTORY"),
+      n(`${plan}-old-left`, "ue8e1", `${plan}-old-root`, "LEFT", 1, "HISTORY"),
+      n(`${plan}-n2575`, "u2575", `${plan}-old-left`, "LEFT", 2),
+      n(`${plan}-nffe0`, "uffe0", `${plan}-old-left`, "RIGHT", 2),
+      n(`${plan}-ne727`, "ue727", `${plan}-old-root`, "RIGHT", 1),
     ];
-    expect(rootSecondLegUnlocked(nodes, "old-root")).toBe(true);
+    expect(rootSecondLegUnlocked(nodes, `${plan}-old-root`)).toBe(true);
     const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("ne727");
+    expect(hole.parent_id).toBe(`${plan}-ne727`);
     expect(hole.position).toBe("LEFT");
-    const withLeft = [...nodes, n("e727L", "x", "ne727", "LEFT", 2)];
-    expect(holeOf(withLeft).parent_id).toBe("ne727");
+    const withLeft = [...nodes, n(`${plan}-e727L`, "x", `${plan}-ne727`, "LEFT", 2)];
+    expect(holeOf(withLeft).parent_id).toBe(`${plan}-ne727`);
     expect(holeOf(withLeft).position).toBe("RIGHT");
   });
 
@@ -136,7 +136,7 @@ describe("leg-first Global allocator", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("CASE 8: same holes for PLAN_100 / 200 / 500 / 1000 / PLAN_SYNTH", () => {
+  it("CASE 8: same PHASE 1 and PHASE 2 holes for PLAN_100 / 200 / 500 / 1000 / PLAN_SYNTH", () => {
     const fingerprints = PLANS.map((plan) => {
       const scoped = [
         n(`${plan}-root`, "ROOT", null, null, 0),
@@ -147,50 +147,67 @@ describe("leg-first Global allocator", () => {
       const h3 = holeOf(withB);
       const withC = [...withB, n(`${plan}-C`, "C", `${plan}-A`, "RIGHT", 2)];
       const h4 = holeOf(withC);
+      const withD = [...withC, n(`${plan}-D`, "D", `${plan}-root`, "RIGHT", 1)];
+      const h5 = holeOf(withD);
+      const withDL = [...withD, n(`${plan}-DL`, "DL", `${plan}-D`, "LEFT", 2)];
+      const h5b = holeOf(withDL);
       return {
         case2Parent: h2.parent_id?.endsWith("-A"),
         case2Side: h2.position,
         case3Side: h3.position,
         case4ParentRoot: h4.parent_id?.endsWith("-root"),
         case4Side: h4.position,
+        case5ParentD: h5.parent_id?.endsWith("-D"),
+        case5Side: h5.position,
+        case5bParentD: h5b.parent_id?.endsWith("-D"),
+        case5bSide: h5b.position,
       };
+    });
+    expect(fingerprints[0]).toEqual({
+      case2Parent: true,
+      case2Side: "LEFT",
+      case3Side: "RIGHT",
+      case4ParentRoot: true,
+      case4Side: "RIGHT",
+      case5ParentD: true,
+      case5Side: "LEFT",
+      case5bParentD: true,
+      case5bSide: "RIGHT",
     });
     for (const fp of fingerprints.slice(1)) {
       expect(fp).toEqual(fingerprints[0]);
     }
   });
 
-  it("CASE 9: re-entry quote uses the same leg-first hole (ROOT.RIGHT after first-leg)", () => {
-    const plan = "PLAN_200";
+  it.each(PLANS)("%s CASE 9: re-entry quote uses the same two-phase hole (ROOT.RIGHT after first-leg)", (plan) => {
     const positions: NetworkPositionRow[] = [
-      { id: "root", user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: "A", user_id: "u-a", plan_id: plan, parent_id: "root", position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: "B", user_id: "u-b", plan_id: plan, parent_id: "A", position: "LEFT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: "C", user_id: "u-c", plan_id: plan, parent_id: "A", position: "RIGHT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-root`, user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-A`, user_id: "u-a", plan_id: plan, parent_id: `${plan}-root`, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-B`, user_id: "u-b", plan_id: plan, parent_id: `${plan}-A`, position: "LEFT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-C`, user_id: "u-c", plan_id: plan, parent_id: `${plan}-A`, position: "RIGHT", depth: 2, cycle: 1, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
     ];
     const legal = findReentryPlacement(positions, "u-a");
-    expect(legal.parent_id).toBe("root");
+    expect(legal.parent_id).toBe(`${plan}-root`);
     expect(legal.position).toBe("RIGHT");
     const store = storeFor(plan, positions);
     const before = JSON.stringify(store.network_positions);
     const intent = quoteReentryInStore(store, "u-a", plan);
     expect(JSON.stringify(store.network_positions)).toBe(before);
-    expect(intent.candidate_parent_position_id).toBe("root");
+    expect(intent.candidate_parent_position_id).toBe(`${plan}-root`);
     expect(intent.candidate_position).toBe("RIGHT");
   });
 
-  it("CASE 10: Direct #2 PREPARE still creates no occupying seat", () => {
-    const plan = "PLAN_200";
+  it.each(PLANS)("%s CASE 10: Direct #2 PREPARE still creates no occupying seat", (plan) => {
     const positions: NetworkPositionRow[] = [
-      { id: "root", user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
-      { id: "A", user_id: "u-a", plan_id: plan, parent_id: "root", position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-root`, user_id: "u-root", plan_id: plan, parent_id: null, position: null, depth: 0, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
+      { id: `${plan}-A`, user_id: "u-a", plan_id: plan, parent_id: `${plan}-root`, position: "LEFT", depth: 1, cycle: 0, status: "ACTIVE", started_at: "2026-08-22T00:00:00.000Z" },
     ];
     const store = storeFor(plan, positions);
     const before = JSON.stringify(store.network_positions);
     const intent = quoteDirect2InStore(store, "u-sx", plan, "u-bx");
     expect(JSON.stringify(store.network_positions)).toBe(before);
     expect(store.network_positions.some((p) => p.status === "RESERVED")).toBe(false);
-    expect(intent.candidate_parent_position_id).toBe("A");
+    expect(intent.candidate_parent_position_id).toBe(`${plan}-A`);
     expect(intent.candidate_position).toBe("LEFT");
   });
 

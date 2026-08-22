@@ -117,8 +117,7 @@ type WalkMaps = {
 };
 
 /**
- * After a node’s own LEFT then RIGHT holes: entire LEFT subtree, then RIGHT subtree.
- * PHASE 1 only (ROOT.RIGHT still gated / not yet an ACTIVE occupant).
+ * PHASE 1 only: ROOT.RIGHT still gated. Own LEFT then RIGHT, then LEFT child, then RIGHT child.
  */
 function visitPreorder<T>(
   current: Node,
@@ -145,8 +144,9 @@ function visitPreorder<T>(
 }
 
 /**
- * PHASE 2: ROOT.RIGHT is unlocked and occupied. Whole opened tree, row-by-row (BFS).
- * LEFT before RIGHT on the same row. HISTORY is walked for ancestry only.
+ * PHASE 2: first-leg has unlocked ROOT.RIGHT. Strict level-order over the opened tree.
+ * Top to bottom, LEFT before RIGHT on the same row. Same walk for every plan_id.
+ * HISTORY is walked for ancestry only and never occupies.
  */
 function visitLevelOrder<T>(
   start: Node,
@@ -196,9 +196,9 @@ function walkMaps(nodes: Node[]): WalkMaps {
 }
 
 /**
- * First empty Global seat.
+ * First empty Global seat. Identical for every plan_id (catalog and admin-created).
  * PHASE 1: ROOT.LEFT, that member’s immediate LEFT then RIGHT, then ROOT.RIGHT (one-time unlock).
- * PHASE 2: after ROOT.RIGHT is unlocked and ACTIVE, whole-tree level order (top to bottom, LEFT to RIGHT).
+ * PHASE 2: after that unlock, whole-tree level order (top to bottom, LEFT to RIGHT).
  * Holes attach under ACTIVE. HISTORY is walked for order only and never occupies.
  */
 export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {

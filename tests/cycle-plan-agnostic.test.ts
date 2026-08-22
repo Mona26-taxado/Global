@@ -213,6 +213,8 @@ describe("authoritative cycleComplete callers (no occupyingOk bypass)", () => {
     const placement = readFileSync(join(root, "network/placement.ts"), "utf8");
     expect(placement).toMatch(/function pickWalkChild/);
     expect(placement).toMatch(/const active = cands\.filter\(isActiveNode\)/);
+    expect(placement).toMatch(/function visitLevelOrder/);
+    expect(placement).toMatch(/function phase2LevelOrder/);
     expect(placement).toMatch(/export const findReentryPlacement = findFirstEmptyPlacement/);
     expect(placement).toMatch(/export const findPowerlinePlacement = findFirstEmptyPlacement/);
     expect(placement).not.toMatch(/slot\.left = node/);
