@@ -69,9 +69,11 @@ function uniqueFundingEvidence(store: Store, planId: string, fromPositionId: str
   const rows = store.network_positions.filter(
     (p) => p.plan_id === planId && p.from_position_id === fromPositionId && p.reentry_tx_hash,
   );
-  const withTx = rows
-    .map((row) => ({ row, tx: confirmedFundingTx(store, planId, row.reentry_tx_hash!) }))
-    .filter((x) => x.tx);
+  const withTx: { row: NetworkPositionRow; tx: TransactionRow }[] = [];
+  for (const row of rows) {
+    const tx = confirmedFundingTx(store, planId, row.reentry_tx_hash!);
+    if (tx) withTx.push({ row, tx });
+  }
   if (!withTx.length) return null;
   const hashes = new Set(withTx.map((x) => x.row.reentry_tx_hash!.toLowerCase()));
   if (hashes.size !== 1) return null;
