@@ -6,7 +6,12 @@ import { createClient } from "@supabase/supabase-js";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { cycleComplete, findFirstEmptyPlacement } from "../network/placement";
-import { firstEmptyQuote, syncReentryQuotesForCompletedCycles } from "../services/placement-intent";
+import {
+  cancelUnpaidAlreadyFundedReentryIntents,
+  cycleAlreadyFunded,
+  firstEmptyQuote,
+  syncReentryQuotesForCompletedCycles,
+} from "../services/placement-intent";
 import { occupyingPosition, positionsForPlan } from "../services/users";
 import type { Store } from "../lib/store";
 
@@ -42,6 +47,7 @@ function scan(store: Store) {
       if (!cycleComplete(scoped, seat.id)) continue;
       const occ = occupyingPosition(store.network_positions, seat.user_id, plan);
       if (!occ || occ.id !== seat.id) continue;
+      const funded = cycleAlreadyFunded(store, plan, seat.id);
       const pending = (store.payment_intents ?? []).filter(
         (i) =>
           i.kind === "GLOBAL_REENTRY" &&
@@ -49,6 +55,17 @@ function scan(store: Store) {
           i.plan_id === plan &&
           i.mover_user_id === seat.user_id,
       );
+      if (funded) {
+        rows.push({
+          plan_id: plan,
+          user: `${codeOf(store, seat.user_id)} / ${walletTail(store, seat.user_id)}`,
+          seat_id: seat.id,
+          cycle_complete: true,
+          already_funded: true,
+          pending_intents: pending.length,
+        });
+        continue;
+      }
       const hole = findFirstEmptyPlacement(scoped, seat.user_id);
       const quote = firstEmptyQuote(store, plan, seat.user_id);
       rows.push({
@@ -81,9 +98,12 @@ async function main() {
 
   const before = scan(store);
   const seatCount = store.network_positions.length;
+  const txCount = store.transactions.length;
   const intentCount = store.payment_intents.length;
+  const cancelOnly = process.env.CANCEL_ONLY === "1";
   if (apply) {
-    syncReentryQuotesForCompletedCycles(store);
+    cancelUnpaidAlreadyFundedReentryIntents(store);
+    if (!cancelOnly) syncReentryQuotesForCompletedCycles(store);
     const { error: writeErr } = await sb.from("app_state").upsert({
       id: "globalx",
       payload: store,
@@ -96,9 +116,14 @@ async function main() {
     JSON.stringify(
       {
         mutated: apply,
+        cancel_only: cancelOnly,
         seats_unchanged: store.network_positions.length === seatCount,
+        txs_unchanged: store.transactions.length === txCount,
         intents_before: intentCount,
         intents_after: store.payment_intents.length,
+        cancelled_already_funded: store.payment_intents
+          .filter((i) => i.status === "CANCELLED" && i.placement_status === "BLOCKED_ALREADY_FUNDED")
+          .map((i) => ({ id: i.id, plan_id: i.plan_id, mover_user_id: i.mover_user_id, tx_hash: i.tx_hash ?? null })),
         completed_cycles: after,
       },
       null,

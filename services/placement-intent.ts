@@ -408,13 +408,78 @@ export function confirmDirect2FromIntent(
   return { placed, intent };
 }
 
-function cycleAlreadyFunded(store: StoreShape, planId: string, fromPositionId: string) {
-  return (store.payment_intents ?? []).some(
-    (i) =>
-      i.plan_id === planId &&
-      i.movement_from_position_id === fromPositionId &&
-      (i.status === "CONFIRMED" || (i.status === "PENDING" && i.kind === "DIRECT2_PLACEMENT")),
+function hashesEqual(a?: string | null, b?: string | null) {
+  return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+}
+
+function samePlanTx(tx: { plan_id: string | null; plan_code?: string }, planId: string) {
+  return tx.plan_id === planId || tx.plan_code === planId;
+}
+
+function confirmedSamePlanTxByHash(store: StoreShape, planId: string, txHash: string) {
+  return (store.transactions ?? []).some(
+    (t) => t.status === "CONFIRMED" && samePlanTx(t, planId) && hashesEqual(t.tx_hash, txHash),
   );
+}
+
+/**
+ * Cycle already paid: bound Direct #2 intent, confirmed re-entry intent,
+ * or a movement seat linked to this source with a confirmed same-plan hash / unambiguous Direct #2 tx.
+ * HISTORY or an unrelated PLAN_PURCHASE alone is not proof.
+ */
+export function cycleAlreadyFunded(store: StoreShape, planId: string, fromPositionId: string) {
+  const intents = store.payment_intents ?? [];
+  if (
+    intents.some(
+      (i) =>
+        i.plan_id === planId &&
+        i.movement_from_position_id === fromPositionId &&
+        i.kind === "DIRECT2_PLACEMENT" &&
+        (i.status === "CONFIRMED" || i.status === "PENDING"),
+    )
+  ) {
+    return true;
+  }
+  if (
+    intents.some(
+      (i) =>
+        i.plan_id === planId &&
+        i.movement_from_position_id === fromPositionId &&
+        i.kind === "GLOBAL_REENTRY" &&
+        i.status === "CONFIRMED",
+    )
+  ) {
+    return true;
+  }
+  for (const row of store.network_positions) {
+    if (row.plan_id !== planId || row.from_position_id !== fromPositionId) continue;
+    if (row.reentry_tx_hash && confirmedSamePlanTxByHash(store, planId, row.reentry_tx_hash)) {
+      return true;
+    }
+    if (!row.funded_by_user_id) continue;
+    const linked = (store.transactions ?? []).filter(
+      (t) =>
+        t.status === "CONFIRMED" &&
+        samePlanTx(t, planId) &&
+        t.user_id === row.funded_by_user_id &&
+        t.position_id === row.id &&
+        (t.direct_number === 2 || t.recipient_role === "GLOBAL_UPLINE"),
+    );
+    if (linked.length > 0) return true;
+  }
+  return false;
+}
+
+/** Unpaid GLOBAL_REENTRY quotes for a cycle that already has funding evidence. Does not touch seats or txs. */
+export function cancelUnpaidAlreadyFundedReentryIntents(store: StoreShape, planId?: string) {
+  for (const row of store.payment_intents ?? []) {
+    if (row.kind !== "GLOBAL_REENTRY" || row.status !== "PENDING" || row.tx_hash) continue;
+    if (planId && row.plan_id !== planId) continue;
+    const fromId = row.movement_from_position_id;
+    if (!fromId || !cycleAlreadyFunded(store, row.plan_id, fromId)) continue;
+    row.status = "CANCELLED";
+    row.placement_status = "BLOCKED_ALREADY_FUNDED";
+  }
 }
 
 /** After any ACTIVE child insert (never PREPARE). Quotes re-entry for newly completed ancestors. */
@@ -423,6 +488,7 @@ export function afterActiveSeatCreated(store: StoreShape, child: NetworkPosition
 }
 
 export function maybeQueueAncestorReentryIntents(store: StoreShape, child: NetworkPositionRow) {
+  cancelUnpaidAlreadyFundedReentryIntents(store, child.plan_id);
   let parentId = child.parent_id;
   while (parentId) {
     const parentPos = store.network_positions.find((p) => p.id === parentId);
@@ -443,6 +509,7 @@ export function maybeQueueAncestorReentryIntents(store: StoreShape, child: Netwo
 
 /** Backfill: every ACTIVE seat whose immediate LEFT+RIGHT are ACTIVE gets one pending quote. */
 export function syncReentryQuotesForCompletedCycles(store: StoreShape, planId?: string) {
+  cancelUnpaidAlreadyFundedReentryIntents(store, planId);
   const planIds = planId
     ? [planId]
     : [...new Set(store.network_positions.map((p) => p.plan_id))];
@@ -475,6 +542,7 @@ export function quoteReentryInStore(store: StoreShape, userId: string, planId: s
   }
   const funded = cycleAlreadyFunded(store, planId, current.id);
   if (funded) {
+    cancelUnpaidAlreadyFundedReentryIntents(store, planId);
     throw new PlacementError(
       "REENTRY_FUNDED_BY_DIRECT2",
       "This cycle is funded by the Direct #2 plan payment that completed it. A separate re-entry payment is not required.",

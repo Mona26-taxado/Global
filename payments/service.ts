@@ -19,7 +19,7 @@ import {
   positionsForPlan,
   voidUnpaidDirect2Provision,
 } from "@/services/users";
-import { findPendingIntent, intentPayee, PlacementError } from "@/services/placement-intent";
+import { cycleAlreadyFunded, findPendingIntent, intentPayee, PlacementError } from "@/services/placement-intent";
 import {
   hasConfirmedPlan,
   isPlanUnlocked,
@@ -420,15 +420,12 @@ export async function listUserPlans(userId: string) {
     const missing = directs.filter((d) => !hasConfirmedPlan(store.transactions, d.user_id, plan.id));
     const waiting = membership && !pos;
     const cycleDone = Boolean(pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id));
-    const fundedByDirect2 = Boolean(
-      (store.payment_intents ?? []).some(
-        (i) => i.status === "CONFIRMED" && i.plan_id === plan.id && i.movement_from_position_id === pos?.id,
-      ),
-    );
+    const fundedByDirect2 = Boolean(pos && cycleAlreadyFunded(store, plan.id, pos.id));
     const pendingReentry = Boolean(
-      (store.payment_intents ?? []).some(
-        (i) => i.status === "PENDING" && i.kind === "GLOBAL_REENTRY" && i.plan_id === plan.id && i.mover_user_id === userId,
-      ),
+      !fundedByDirect2 &&
+        (store.payment_intents ?? []).some(
+          (i) => i.status === "PENDING" && i.kind === "GLOBAL_REENTRY" && i.plan_id === plan.id && i.mover_user_id === userId,
+        ),
     );
     const reentryRequired = fundedByDirect2 ? false : cycleDone || pendingReentry;
     const global_status = planViewState({

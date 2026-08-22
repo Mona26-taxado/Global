@@ -3,8 +3,10 @@ import type { Store } from "../lib/store";
 import { cycleComplete, findFirstEmptyPlacement, isActiveNode } from "../network/placement";
 import {
   afterActiveSeatCreated,
+  cancelUnpaidAlreadyFundedReentryIntents,
   confirmDirect2FromIntent,
   confirmReentryFromIntent,
+  cycleAlreadyFunded,
   firstEmptyQuote,
   intentPayee,
   quoteDirect2InStore,
@@ -375,5 +377,103 @@ describe("auto-queue re-entry when a cycle completes", () => {
       hops.push({ mover, newParent: newParent?.user_id ?? null, parentIntent: parentComplete && Boolean(newParent && isActiveNode(newParent)) });
     }
     expect(hops).toHaveLength(4);
+  });
+
+  function completeCycle(plan: (typeof PLANS)[number]) {
+    return storeFor([
+      pos(plan, "root", "u-a", null, null, 0),
+      pos(plan, "left", "u-left", "root", "LEFT", 1),
+      pos(plan, "right", "u-right", "root", "RIGHT", 1),
+    ]);
+  }
+
+  function confirmedDirect2Tx(
+    plan: string,
+    opts: { id: string; userId: string; hash: string; positionId: string | null },
+  ) {
+    return {
+      id: opts.id,
+      user_id: opts.userId,
+      payer_wallet: "0xdddddddddddddddddddddddddddddddddddddddd",
+      recipient_wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      amount: "100000000",
+      token: "USDT",
+      token_contract: "0x1111",
+      chain_id: 137,
+      tx_hash: opts.hash,
+      payment_type: "PLAN_PURCHASE" as const,
+      plan_id: plan,
+      plan_code: plan,
+      status: "CONFIRMED" as const,
+      recipient_role: "GLOBAL_UPLINE" as const,
+      routing_slot: 2 as const,
+      direct_number: 2 as const,
+      position_id: opts.positionId,
+      created_at: "2026-08-22T12:00:00.000Z",
+    };
+  }
+
+  it.each(PLANS)("%s: legacy funded movement (from_position + confirmed hash) is already funded; no GLOBAL_REENTRY", (plan) => {
+    const store = completeCycle(plan);
+    const fromId = `${plan}-root`;
+    const hash = `0xlegacy-${plan}`;
+    store.network_positions.push({
+      ...pos(plan, "moved", "u-a", "left", "LEFT", 2, "HISTORY"),
+      from_position_id: fromId,
+      reentry_tx_hash: hash,
+      funded_by_user_id: "u-new",
+    });
+    store.transactions.push(confirmedDirect2Tx(plan, { id: `tx-${plan}-legacy`, userId: "u-new", hash, positionId: `${plan}-moved` }));
+
+    expect(cycleAlreadyFunded(store, plan, fromId)).toBe(true);
+    afterActiveSeatCreated(store, store.network_positions[2]!);
+    syncReentryQuotesForCompletedCycles(store, plan);
+    syncReentryQuotesForCompletedCycles(store, plan);
+    expect(pendingReentry(store, "u-a", plan)).toHaveLength(0);
+    expect((store.payment_intents ?? []).filter((i) => i.kind === "GLOBAL_REENTRY" && i.plan_id === plan && i.status === "PENDING")).toHaveLength(0);
+    expect(() => quoteReentryInStore(store, "u-a", plan)).toThrow(/funded by the Direct #2/);
+  });
+
+  it.each(PLANS)("%s: unpaid GLOBAL_REENTRY for a legacy-funded cycle is cancelled, not charged", (plan) => {
+    const store = completeCycle(plan);
+    afterActiveSeatCreated(store, store.network_positions[2]!);
+    expect(pendingReentry(store, "u-a", plan)).toHaveLength(1);
+    const hash = `0xlate-${plan}`;
+    store.network_positions.push({
+      ...pos(plan, "moved", "u-a", "left", "LEFT", 2, "HISTORY"),
+      from_position_id: `${plan}-root`,
+      reentry_tx_hash: hash,
+      funded_by_user_id: "u-new",
+    });
+    store.transactions.push(confirmedDirect2Tx(plan, { id: `tx-${plan}-late`, userId: "u-new", hash, positionId: `${plan}-moved` }));
+    expect(cycleAlreadyFunded(store, plan, `${plan}-root`)).toBe(true);
+    cancelUnpaidAlreadyFundedReentryIntents(store, plan);
+    const cancelled = (store.payment_intents ?? []).find((i) => i.kind === "GLOBAL_REENTRY" && i.plan_id === plan);
+    expect(cancelled?.status).toBe("CANCELLED");
+    expect(cancelled?.placement_status).toBe("BLOCKED_ALREADY_FUNDED");
+    expect(pendingReentry(store, "u-a", plan)).toHaveLength(0);
+    syncReentryQuotesForCompletedCycles(store, plan);
+    expect(pendingReentry(store, "u-a", plan)).toHaveLength(0);
+  });
+
+  it.each(PLANS)("%s: HISTORY without confirmed movement evidence is not funded", (plan) => {
+    const store = completeCycle(plan);
+    store.network_positions.push({
+      ...pos(plan, "moved", "u-a", "left", "LEFT", 2, "HISTORY"),
+      from_position_id: `${plan}-root`,
+    });
+    expect(cycleAlreadyFunded(store, plan, `${plan}-root`)).toBe(false);
+    afterActiveSeatCreated(store, store.network_positions[2]!);
+    expect(pendingReentry(store, "u-a", plan)).toHaveLength(1);
+  });
+
+  it.each(PLANS)("%s: unrelated confirmed plan purchase is not funded", (plan) => {
+    const store = completeCycle(plan);
+    store.transactions.push(
+      confirmedDirect2Tx(plan, { id: `tx-${plan}-unrelated`, userId: "u-a", hash: `0xunrel-${plan}`, positionId: null }),
+    );
+    expect(cycleAlreadyFunded(store, plan, `${plan}-root`)).toBe(false);
+    afterActiveSeatCreated(store, store.network_positions[2]!);
+    expect(pendingReentry(store, "u-a", plan)).toHaveLength(1);
   });
 });

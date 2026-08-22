@@ -131,7 +131,7 @@ export type PaymentIntentRow = {
   skip_placement?: boolean;
   quoted_at: string;
   tx_hash?: string | null;
-  placement_status?: "OK" | "STALE_ROUTE" | "RECIPIENT_CHANGED" | "BLOCKED_STALE_ROUTE" | null;
+  placement_status?: "OK" | "STALE_ROUTE" | "RECIPIENT_CHANGED" | "BLOCKED_STALE_ROUTE" | "BLOCKED_ALREADY_FUNDED" | null;
 };
 
 export type NetworkPositionRow = {
@@ -152,7 +152,7 @@ export type NetworkPositionRow = {
   /** Direct #2 buyer whose plan payment funds this reserved movement. Blocks a second GLOBAL_REENTRY for the same cycle. */
   funded_by_user_id?: string | null;
   /** Explicit admin/genesis ROOT move. Never a substitute for a paid GLOBAL_REENTRY. */
-  source?: "ADMIN_GENESIS_RECONCILIATION" | string | null;
+  source?: "ADMIN_GENESIS_RECONCILIATION" | "LEGACY_FUNDED_MOVEMENT_RECONCILIATION" | string | null;
 };
 
 export type GlobalConfig = {
