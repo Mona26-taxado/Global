@@ -1,4 +1,4 @@
-export const TREE_MIN_SCALE = 0.25;
+export const TREE_MIN_SCALE = 0.5;
 export const TREE_MAX_SCALE = 2.2;
 export const TREE_ZOOM_FACTOR = 1.18;
 
@@ -57,10 +57,12 @@ export function fitTreeToViewport(input: {
   const cw = Math.max(1, input.contentWidth);
   const ch = Math.max(1, input.contentHeight);
   const scale = clampTreeScale(Math.min((vw - pad * 2) / cw, (vh - pad * 2) / ch));
+  const extraY = Math.max(0, vh - ch * scale);
   return {
     scale,
     positionX: (vw - cw * scale) / 2,
-    positionY: (vh - ch * scale) / 2,
+    /** Bias the root toward the upper third while keeping the full tree in view. */
+    positionY: extraY * 0.28,
   };
 }
 

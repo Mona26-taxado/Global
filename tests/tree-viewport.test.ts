@@ -38,7 +38,7 @@ describe("tree viewport zoom", () => {
     expect(fit.positionX).not.toBe(0);
     expect(fit.positionY).toBeGreaterThanOrEqual(0);
     expect(fit.positionX).toBeCloseTo((1000 - 400 * fit.scale) / 2, 6);
-    expect(fit.positionY).toBeCloseTo((640 - 300 * fit.scale) / 2, 6);
+    expect(fit.positionY).toBeCloseTo((640 - 300 * fit.scale) * 0.28, 6);
   });
 
   it("resize keeps the viewed center", () => {
@@ -61,7 +61,7 @@ describe("tree viewport zoom", () => {
   });
 
   it("clamps min/max zoom", () => {
-    expect(clampTreeScale(0.01)).toBe(0.25);
+    expect(clampTreeScale(0.01)).toBe(0.5);
     expect(clampTreeScale(9)).toBe(2.2);
   });
 });
