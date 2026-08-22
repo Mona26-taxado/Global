@@ -114,7 +114,7 @@ export async function ensureCompanyRoot(planId: string) {
   const existingPos = currentPosition(after.network_positions, COMPANY_USER_ID, planId);
   if (existingPos) return existingPos;
   if (after.network_positions.some((p) => p.plan_id === planId && (p.status ?? "ACTIVE") === "ACTIVE")) return null;
-  return await placeUser(COMPANY_USER_ID, planId);
+  return await placeUser(COMPANY_USER_ID, planId, { allowUnpaidInsert: true });
 }
 
 async function requireVerifiedWallet(userId: string, code: string, message: string): Promise<`0x${string}`> {

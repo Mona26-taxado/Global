@@ -254,18 +254,35 @@ export function assertRegistrationDidNotCreateGlobal(store: StoreShape, userId: 
   }
 }
 
-export async function placeUser(userId: string, planId?: string): Promise<NetworkPositionRow> {
-  return withStore((store) => {
-    const plan = resolvePlanId(store, planId);
-    const existing = currentPosition(store.network_positions, userId, plan);
-    if (existing) {
-      maybeReenterAncestors(store, existing);
-      return existing;
-    }
-    const row = insertActivePosition(store, userId, plan);
-    maybeReenterAncestors(store, row);
-    return row;
-  });
+export const UNPAID_ACTIVE_INSERT_BLOCKED = "UNPAID_ACTIVE_INSERT_BLOCKED";
+
+export function placeUserInStore(
+  store: StoreShape,
+  userId: string,
+  planId?: string,
+  opts?: { allowUnpaidInsert?: boolean },
+): NetworkPositionRow {
+  if (!opts?.allowUnpaidInsert) {
+    throw new Error(UNPAID_ACTIVE_INSERT_BLOCKED);
+  }
+  const plan = resolvePlanId(store, planId);
+  const existing = currentPosition(store.network_positions, userId, plan);
+  if (existing) {
+    maybeReenterAncestors(store, existing);
+    return existing;
+  }
+  const row = insertActivePosition(store, userId, plan);
+  maybeReenterAncestors(store, row);
+  return row;
+}
+
+/** Seed/demo/company-root only. Payment paths must not call this without allowUnpaidInsert. */
+export async function placeUser(
+  userId: string,
+  planId?: string,
+  opts?: { allowUnpaidInsert?: boolean },
+): Promise<NetworkPositionRow> {
+  return withStore((store) => placeUserInStore(store, userId, planId, opts));
 }
 
 /** Qualify + reserve next Global seat. Does not activate until re-entry payment is verified. */

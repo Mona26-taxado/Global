@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { Store } from "../lib/store";
-import { cycleComplete, findFirstEmptyPlacement } from "../network/placement";
+import { cycleComplete, findFirstEmptyPlacement, isActiveNode } from "../network/placement";
 import {
   afterActiveSeatCreated,
   confirmDirect2FromIntent,
   confirmReentryFromIntent,
   firstEmptyQuote,
+  intentPayee,
   quoteDirect2InStore,
+  quoteReentryInStore,
   syncReentryQuotesForCompletedCycles,
 } from "../services/placement-intent";
 import { applyGenesisReconciliation } from "../services/genesis-reconciliation";
 import { DEFAULT_GENESIS_WALLET } from "../lib/network-config";
+import { occupyingPosition, placeUserInStore, UNPAID_ACTIVE_INSERT_BLOCKED } from "../services/users";
 import type { NetworkPositionRow } from "../types";
 
 const PLANS = ["PLAN_100", "PLAN_200", "PLAN_500", "PLAN_1000", "PLAN_SYNTH"] as const;
@@ -150,6 +153,73 @@ describe("auto-queue re-entry when a cycle completes", () => {
     expect(pendingReentry(store, "u-a", plan)).toHaveLength(0);
   });
 
+  it.each(PLANS)(
+    "%s: X.LEFT ACTIVE + Direct #2 CONFIRM at X.RIGHT moves X on that payment; no GLOBAL_REENTRY",
+    (plan) => {
+      const store = storeFor([
+        pos(plan, "root", "u-a", null, null, 0),
+        pos(plan, "x", "u-x", "root", "LEFT", 1),
+        pos(plan, "xleft", "u-xl", "x", "LEFT", 2),
+      ]);
+      store.users.push(user("u-x", "GXXXXXXX"), user("u-xl", "GXXLEFTX"), user("u-sp", "GXSPONXX"), user("u-by", "GXBUYERX"));
+      store.wallets.push(
+        wallet("w-x", "u-x", "0x1111111111111111111111111111111111111111"),
+        wallet("w-xl", "u-xl", "0x2222222222222222222222222222222222222222"),
+        wallet("w-sp", "u-sp", "0x3333333333333333333333333333333333333333"),
+      );
+      const scoped = () => store.network_positions.filter((p) => p.plan_id === plan);
+      const xOld = `${plan}-x`;
+      expect(store.network_positions.find((p) => p.id === `${plan}-xleft`)?.parent_id).toBe(xOld);
+      expect(store.network_positions.find((p) => p.id === `${plan}-xleft`)?.position).toBe("LEFT");
+      expect(cycleComplete(scoped(), xOld)).toBe(false);
+
+      const hole = firstEmptyQuote(store, plan, "u-sp");
+      expect(hole.parent_id).toBe(xOld);
+      expect(hole.position).toBe("RIGHT");
+
+      const beforeSeats = store.network_positions.length;
+      const quoted = quoteDirect2InStore(store, "u-sp", plan, "u-by");
+      expect(store.network_positions).toHaveLength(beforeSeats);
+      expect(quoted.kind).toBe("DIRECT2_PLACEMENT");
+      expect(quoted.status).toBe("PENDING");
+      expect(quoted.candidate_parent_position_id).toBe(xOld);
+      expect(quoted.candidate_position).toBe("RIGHT");
+      expect(quoted.movement_user_id).toBe("u-x");
+      expect(quoted.movement_from_position_id).toBe(xOld);
+      expect(quoted.movement_parent_position_id).toBeTruthy();
+      expect(pendingReentry(store, "u-x", plan)).toHaveLength(0);
+      expect((store.payment_intents ?? []).filter((i) => i.kind === "GLOBAL_REENTRY" && i.plan_id === plan)).toHaveLength(0);
+
+      const nextParent = quoted.movement_parent_position_id;
+      const nextSide = quoted.movement_position;
+      confirmDirect2FromIntent(store, "u-by", plan, `0xd2-cycle-${plan}`, intentPayee(quoted));
+
+      const xOldRow = store.network_positions.find((p) => p.id === xOld)!;
+      expect(xOldRow.status).toBe("HISTORY");
+      const xLive = occupyingPosition(store.network_positions, "u-x", plan);
+      expect(xLive?.status).toBe("ACTIVE");
+      expect(xLive?.id).not.toBe(xOld);
+      expect(xLive?.parent_id).toBe(nextParent);
+      expect(xLive?.position).toBe(nextSide);
+      expect(store.network_positions.filter((p) => p.user_id === "u-x" && p.plan_id === plan && isActiveNode(p))).toHaveLength(1);
+
+      const sponsorSeat = occupyingPosition(store.network_positions, "u-sp", plan);
+      expect(sponsorSeat?.status).toBe("ACTIVE");
+      expect(sponsorSeat?.parent_id).toBe(xOld);
+      expect(sponsorSeat?.position).toBe("RIGHT");
+      expect(cycleComplete(scoped(), xOld)).toBe(true);
+
+      const d2 = (store.payment_intents ?? []).find(
+        (i) => i.kind === "DIRECT2_PLACEMENT" && i.buyer_user_id === "u-by" && i.plan_id === plan,
+      );
+      expect(d2?.status).toBe("CONFIRMED");
+      expect(d2?.movement_user_id).toBe("u-x");
+      expect((store.payment_intents ?? []).filter((i) => i.kind === "GLOBAL_REENTRY" && i.mover_user_id === "u-x")).toHaveLength(0);
+      expect((store.payment_intents ?? []).filter((i) => i.kind === "GLOBAL_REENTRY" && i.plan_id === plan)).toHaveLength(0);
+      expect(store.transactions.filter((t) => t.payment_type === "GLOBAL_REENTRY" && t.user_id === "u-x")).toHaveLength(0);
+    },
+  );
+
   it.each(PLANS)("%s: PREPARE does not queue; Direct #2 that funds the cycle does not add GLOBAL_REENTRY", (plan) => {
     const store = storeFor([
       pos(plan, "root", "u-a", null, null, 0),
@@ -185,5 +255,125 @@ describe("auto-queue re-entry when a cycle completes", () => {
       expect(pendingReentry(store, "u-left", plan)).toHaveLength(1);
       expect(store.network_positions.filter((p) => p.plan_id === plan && (p.status ?? "ACTIVE") === "ACTIVE" && p.user_id === "u-genesis")).toHaveLength(1);
     }
+  });
+
+  it("placeUserInStore without allowUnpaidInsert does not insert ACTIVE", () => {
+    const store = storeFor([pos("PLAN_100", "root", "u-a", null, null, 0)]);
+    const before = store.network_positions.length;
+    expect(() => placeUserInStore(store, "u-new", "PLAN_100")).toThrow(UNPAID_ACTIVE_INSERT_BLOCKED);
+    expect(store.network_positions).toHaveLength(before);
+  });
+
+  it.each(PLANS)("%s: re-entry quote refreshes when the legal hole changes; old payee cannot confirm", (plan) => {
+    const store = storeFor([
+      pos(plan, "root", "u-a", null, null, 0),
+      pos(plan, "left", "u-left", "root", "LEFT", 1),
+      pos(plan, "right", "u-right", "root", "RIGHT", 1),
+    ]);
+    afterActiveSeatCreated(store, store.network_positions[2]!);
+    const first = quoteReentryInStore(store, "u-a", plan);
+    const oldWallet = first.candidate_recipient_wallet;
+    const quotedParent = first.candidate_parent_position_id;
+    const quotedSide = first.candidate_position;
+    let steal = 0;
+    const occupyQuotedHole = () => {
+      const hole = firstEmptyQuote(store, plan, "u-a");
+      steal += 1;
+      const id = `u-steal${steal}`;
+      store.users.push(user(id, `GXST${steal}`));
+      store.wallets.push(wallet(`w-${id}`, id, `0x${(10 + steal).toString(16).padStart(40, "1")}`));
+      store.network_positions.push({
+        id: `${plan}-steal${steal}`,
+        user_id: id,
+        plan_id: plan,
+        parent_id: hole.parent_id,
+        position: hole.position,
+        depth: hole.depth,
+        cycle: Math.floor(hole.depth / 2),
+        status: "ACTIVE",
+        started_at: "2026-08-22T12:00:00.000Z",
+      });
+    };
+    occupyQuotedHole();
+    while (firstEmptyQuote(store, plan, "u-a").recipient_wallet === oldWallet && steal < 8) {
+      occupyQuotedHole();
+    }
+    const live = firstEmptyQuote(store, plan, "u-a");
+    expect(live.parent_id !== quotedParent || live.position !== quotedSide).toBe(true);
+    expect(live.recipient_wallet).not.toBe(oldWallet);
+    const refreshed = quoteReentryInStore(store, "u-a", plan);
+    expect(refreshed.id).toBe(first.id);
+    expect(refreshed.candidate_parent_position_id !== quotedParent || refreshed.candidate_position !== quotedSide).toBe(
+      true,
+    );
+    expect(refreshed.candidate_recipient_wallet).not.toBe(oldWallet);
+    expect(() => confirmReentryFromIntent(store, "u-a", plan, `0xold-${plan}`, oldWallet!)).toThrow(
+      /does not match the quoted Global upline|no longer the first empty/,
+    );
+    expect(occupyingPosition(store.network_positions, "u-a", plan)?.id).toBe(`${plan}-root`);
+  });
+
+  it.each(PLANS)("%s: four sequential complete → re-entry confirm cycles", (plan) => {
+    const store = storeFor([pos(plan, "root", "u-a", null, null, 0)]);
+    let n = 0;
+    const ensure = (id: string) => {
+      if (!store.users.some((u) => u.id === id)) {
+        store.users.push(user(id, `GX${id.replace(/\W/g, "").slice(0, 6).toUpperCase().padEnd(6, "X")}`));
+        store.wallets.push(wallet(`w-${id}`, id, `0x${(n + 20).toString(16).padStart(40, "e")}`));
+      }
+    };
+    const addAtHole = () => {
+      n += 1;
+      const id = `u-fill${n}`;
+      ensure(id);
+      const hole = findFirstEmptyPlacement(
+        store.network_positions.filter((p) => p.plan_id === plan),
+        id,
+      );
+      const row: NetworkPositionRow = {
+        id: `${plan}-fill${n}`,
+        user_id: id,
+        plan_id: plan,
+        parent_id: hole.parent_id,
+        position: hole.position,
+        depth: hole.depth,
+        cycle: Math.floor(hole.depth / 2),
+        status: "ACTIVE",
+        started_at: "2026-08-22T12:00:00.000Z",
+      };
+      store.network_positions.push(row);
+      afterActiveSeatCreated(store, row);
+      return row;
+    };
+    const pendingAny = () =>
+      (store.payment_intents ?? []).filter((i) => i.kind === "GLOBAL_REENTRY" && i.status === "PENDING" && i.plan_id === plan);
+
+    const hops: { mover: string; newParent: string | null; parentIntent: boolean }[] = [];
+    for (let cycle = 0; cycle < 4; cycle++) {
+      let guard = 0;
+      while (pendingAny().length === 0 && guard < 30) {
+        addAtHole();
+        guard += 1;
+      }
+      expect(pendingAny().length).toBeGreaterThan(0);
+      const intent = pendingAny()[0]!;
+      const mover = intent.mover_user_id;
+      const old = occupyingPosition(store.network_positions, mover, plan)!;
+      const dupBefore = pendingReentry(store, mover, plan).length;
+      expect(dupBefore).toBe(1);
+      const placed = confirmReentryFromIntent(store, mover, plan, `0xchain${cycle}-${plan}`, intent.candidate_recipient_wallet!);
+      expect(old.status).toBe("HISTORY");
+      expect(placed.status).toBe("ACTIVE");
+      expect(placed.parent_id).toBe(intent.candidate_parent_position_id);
+      expect(store.network_positions.filter((p) => p.user_id === mover && p.plan_id === plan && isActiveNode(p))).toHaveLength(1);
+      expect(pendingReentry(store, mover, plan)).toHaveLength(0);
+      const newParent = store.network_positions.find((p) => p.id === placed.parent_id);
+      const parentComplete = Boolean(newParent && cycleComplete(store.network_positions.filter((p) => p.plan_id === plan), newParent.id));
+      if (parentComplete && newParent && isActiveNode(newParent)) {
+        expect(pendingReentry(store, newParent.user_id, plan)).toHaveLength(1);
+      }
+      hops.push({ mover, newParent: newParent?.user_id ?? null, parentIntent: parentComplete && Boolean(newParent && isActiveNode(newParent)) });
+    }
+    expect(hops).toHaveLength(4);
   });
 });

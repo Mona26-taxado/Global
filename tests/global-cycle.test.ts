@@ -142,7 +142,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
 
     await confirmPlan("user_a", "A");
     await confirmPlan("user_x", "X");
-    await placeUser("user_a");
+    await placeUser("user_a", undefined, { allowUnpaidInsert: true });
 
     const yRef = await assignSponsor("user_y", "GXBBBBBB");
     expect(yRef.direct_number).toBe(1);
@@ -236,8 +236,8 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await confirmPlan("user_a", "A");
     await confirmPlan("user_x", "X");
     await confirmPlan("user_y", "Y");
-    await placeUser("user_a");
-    await placeUser("user_x");
+    await placeUser("user_a", undefined, { allowUnpaidInsert: true });
+    await placeUser("user_x", undefined, { allowUnpaidInsert: true });
     await fillBothLegs("user_a", "user_x", "user_y");
 
     let store = await readStore();
@@ -340,8 +340,8 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
         created_at: "2026-06-02T00:00:00.000Z",
       });
     });
-    await placeUser("user_a");
-    await placeUser("user_x");
+    await placeUser("user_a", undefined, { allowUnpaidInsert: true });
+    await placeUser("user_x", undefined, { allowUnpaidInsert: true });
     await fillBothLegs("user_a", "user_x", "user_y");
 
     await qualifyForReentry("user_a");
@@ -389,8 +389,8 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await member("user_x", "GXBBBBBB", "X");
     await member("user_y", "GXCCCCCC", "Y");
     await confirmPlan("user_a", "A");
-    await placeUser("user_a");
-    await placeUser("user_x");
+    await placeUser("user_a", undefined, { allowUnpaidInsert: true });
+    await placeUser("user_x", undefined, { allowUnpaidInsert: true });
     await fillBothLegs("user_a", "user_x", "user_y");
     await qualifyForReentry("user_a");
     await withStore((store) => {
@@ -408,8 +408,8 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await member("user_x", "GXBBBBBB", "X");
     await member("user_y", "GXCCCCCC", "Y");
     await confirmPlan("user_a", "A");
-    await placeUser("user_a");
-    await placeUser("user_x");
+    await placeUser("user_a", undefined, { allowUnpaidInsert: true });
+    await placeUser("user_x", undefined, { allowUnpaidInsert: true });
     await fillBothLegs("user_a", "user_x", "user_y");
     await withStore((store) => {
       const w = store.wallets.find((x) => x.user_id === "user_x")!;

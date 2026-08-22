@@ -175,7 +175,7 @@ describe("$5 registration does not enter Global", () => {
     await confirmPlan("user_root", ROOT);
     await confirmPlan("user_s", SPONSOR);
     await confirmPlan("user_d1", BUYER);
-    await placeUser("user_root", "PLAN_100");
+    await placeUser("user_root", "PLAN_100", { allowUnpaidInsert: true });
     await assignSponsor("user_s", "GXROOTAA");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");

@@ -198,8 +198,8 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await confirmPlan("user_root", ADDR.ROOT);
     await confirmPlan("user_e8e1", ADDR.E8E1);
     await confirmPlan("user_right", ADDR.RIGHT);
-    await placeUser("user_root", "PLAN_100");
-    await placeUser("user_e8e1", "PLAN_100");
+    await placeUser("user_root", "PLAN_100", { allowUnpaidInsert: true });
+    await placeUser("user_e8e1", "PLAN_100", { allowUnpaidInsert: true });
 
     await assignSponsor("user_right_d1", "GXRIGHTA");
     await assignSponsor("user_payer", "GXRIGHTA");
@@ -247,15 +247,15 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await confirmPlan("user_b", ADDR.B);
     await confirmPlan("user_c", ADDR.C);
     await confirmPlan("user_d", ADDR.D);
-    const a = await placeUser("user_a", "PLAN_100");
-    const b = await placeUser("user_b", "PLAN_100");
-    const c = await placeUser("user_c", "PLAN_100");
+    const a = await placeUser("user_a", "PLAN_100", { allowUnpaidInsert: true });
+    const b = await placeUser("user_b", "PLAN_100", { allowUnpaidInsert: true });
+    const c = await placeUser("user_c", "PLAN_100", { allowUnpaidInsert: true });
     expect(b.parent_id).toBe(a.id);
     expect(b.position).toBe("LEFT");
     expect(c.parent_id).toBe(b.id);
     expect(c.position).toBe("LEFT");
     expect(reservedPosition((await readStore()).network_positions, "user_a", "PLAN_100")).toBeNull();
-    const d = await placeUser("user_d", "PLAN_100");
+    const d = await placeUser("user_d", "PLAN_100", { allowUnpaidInsert: true });
     expect(d.parent_id).toBe(b.id);
     expect(d.position).toBe("RIGHT");
     await withStore((store) => {
@@ -264,7 +264,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     });
     await member("user_e", "GXEEEEEE", ADDR.PAYER);
     await confirmPlan("user_e", ADDR.PAYER);
-    const e = await placeUser("user_e", "PLAN_100");
+    const e = await placeUser("user_e", "PLAN_100", { allowUnpaidInsert: true });
     expect(e.parent_id).not.toBe(a.id);
   });
 
@@ -274,8 +274,8 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     for (const plan of ["PLAN_100", "PLAN_200", "PLAN_500", "PLAN_1000"] as const) {
       await confirmPlan("user_a", ADDR.A, plan);
       await confirmPlan("user_b", ADDR.B, plan);
-      const root = await placeUser("user_a", plan);
-      const child = await placeUser("user_b", plan);
+      const root = await placeUser("user_a", plan, { allowUnpaidInsert: true });
+      const child = await placeUser("user_b", plan, { allowUnpaidInsert: true });
       expect(root.plan_id).toBe(plan);
       expect(child.plan_id).toBe(plan);
       expect(child.parent_id).toBe(root.id);
@@ -315,8 +315,8 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
       await confirmPlan(id, ADDR.ROOT, "PLAN_1000");
       await confirmPlan(id, ADDR.ROOT, "PLAN_ADMIN");
     }
-    await placeUser("user_root", "PLAN_ADMIN");
-    await placeUser("user_left", "PLAN_ADMIN");
+    await placeUser("user_root", "PLAN_ADMIN", { allowUnpaidInsert: true });
+    await placeUser("user_left", "PLAN_ADMIN", { allowUnpaidInsert: true });
     await assignSponsor("user_right_d1", "GXRIGHTA");
     await assignSponsor("user_payer", "GXRIGHTA");
     const pay = await resolvePlanRecipient("user_payer", "PLAN_ADMIN");
@@ -333,7 +333,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await member("user_d2", "GXDIRECT2", ADDR.PAYER);
     await confirmPlan("user_root", ADDR.ROOT);
     await confirmPlan("user_s", ADDR.A);
-    await placeUser("user_root", "PLAN_100");
+    await placeUser("user_root", "PLAN_100", { allowUnpaidInsert: true });
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
     await confirmPlan("user_d1", ADDR.B);
@@ -354,7 +354,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await member("user_d2", "GXDIRECT2", ADDR.PAYER);
     await confirmPlan("user_root", ADDR.ROOT);
     await confirmPlan("user_s", ADDR.A);
-    await placeUser("user_root", "PLAN_100");
+    await placeUser("user_root", "PLAN_100", { allowUnpaidInsert: true });
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
     await confirmPlan("user_d1", ADDR.B);
@@ -395,7 +395,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await member("user_d2", "GXDIRECT2", ADDR.PAYER);
     await confirmPlan("user_root", ADDR.ROOT);
     await confirmPlan("user_s", ADDR.A);
-    await placeUser("user_root", "PLAN_100");
+    await placeUser("user_root", "PLAN_100", { allowUnpaidInsert: true });
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
     await confirmPlan("user_d1", ADDR.B);

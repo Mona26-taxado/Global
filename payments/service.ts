@@ -111,31 +111,6 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
       throw new Error("Complete $5 registration first. Plans unlock only after registration is ACTIVE.");
     }
     const planId = opts?.planId ?? parsedType.planId;
-    if (opts?.forConfirm && planId) {
-      const stored = findPendingIntent(await readStore(), "GLOBAL_REENTRY", userId, planId);
-      if (stored) {
-        const plan = (await readStore()).plans.find((p) => p.id === stored.plan_id);
-        return {
-          paymentType: "GLOBAL_REENTRY" as const,
-          planId: stored.plan_id,
-          planCode: plan?.code ?? stored.plan_id,
-          chainId: activeChainId(),
-          tokenContract: token,
-          recipient: intentPayee(stored),
-          amountUsd: stored.amount_usd,
-          amountUnits: amountToUnits(stored.amount_usd).toString(),
-          decimals: 6,
-          symbol: "USDT",
-          recipientRole: "GLOBAL_REENTRY" as const,
-          slot: null as 1 | 2 | null,
-          directNumber: null as 1 | 2 | null,
-          globalParentUserId: stored.candidate_recipient_user_id,
-          positionId: null as string | null,
-          intentId: stored.id,
-          notice: "Quoted re-entry route (not refreshed).",
-        };
-      }
-    }
     const routed = await resolveReentryPayment(userId, planId);
     return {
       paymentType: "GLOBAL_REENTRY" as const,

@@ -168,8 +168,8 @@ describe("plan-scoped Global trees", () => {
     await member("user_r", "GXRRRRRR", "R");
     await confirmPlan("user_x", "X", "P1");
     await confirmPlan("user_x", "X", "P2");
-    await placeUser("user_x", "P1");
-    await placeUser("user_x", "P2");
+    await placeUser("user_x", "P1", { allowUnpaidInsert: true });
+    await placeUser("user_x", "P2", { allowUnpaidInsert: true });
     await withStore((store) => {
       for (const planId of ["P1", "P2"] as const) {
         const parent = currentPosition(store.network_positions, "user_x", planId)!;
@@ -226,10 +226,10 @@ describe("plan-scoped Global trees", () => {
     await confirmPlan("user_x", "X", "P1");
     await confirmPlan("user_y", "Y", "P1");
     await confirmPlan("user_z", "Z", "P1");
-    const p1A = await placeUser("user_a", "P1");
-    const p1X = await placeUser("user_x", "P1");
-    const p1Y = await placeUser("user_y", "P1");
-    const p1Z = await placeUser("user_z", "P1");
+    const p1A = await placeUser("user_a", "P1", { allowUnpaidInsert: true });
+    const p1X = await placeUser("user_x", "P1", { allowUnpaidInsert: true });
+    const p1Y = await placeUser("user_y", "P1", { allowUnpaidInsert: true });
+    const p1Z = await placeUser("user_z", "P1", { allowUnpaidInsert: true });
     expect(p1X.parent_id).toBe(p1A.id);
     expect(p1Y.parent_id).toBe(p1X.id);
     expect(p1Y.position).toBe("LEFT");
@@ -239,9 +239,9 @@ describe("plan-scoped Global trees", () => {
     await confirmPlan("user_a", "A", "P2");
     await confirmPlan("user_x", "X", "P2");
     await confirmPlan("user_y", "Y", "P2");
-    const p2A = await placeUser("user_a", "P2");
-    const p2X = await placeUser("user_x", "P2");
-    const p2Y = await placeUser("user_y", "P2");
+    const p2A = await placeUser("user_a", "P2", { allowUnpaidInsert: true });
+    const p2X = await placeUser("user_x", "P2", { allowUnpaidInsert: true });
+    const p2Y = await placeUser("user_y", "P2", { allowUnpaidInsert: true });
     expect(p2A.id).not.toBe(p1A.id);
     expect(p2X.parent_id).toBe(p2A.id);
     expect(p2X.position).toBe("LEFT");
@@ -266,8 +266,8 @@ describe("plan-scoped Global trees", () => {
     });
     await confirmPlan("user_a", "A", "P3");
     await confirmPlan("user_x", "X", "P3");
-    const p3A = await placeUser("user_a", "P3");
-    const p3X = await placeUser("user_x", "P3");
+    const p3A = await placeUser("user_a", "P3", { allowUnpaidInsert: true });
+    const p3X = await placeUser("user_x", "P3", { allowUnpaidInsert: true });
     expect(p3A.plan_id).toBe("P3");
     expect(p3X.plan_id).toBe("P3");
     expect(p3X.parent_id).toBe(p3A.id);

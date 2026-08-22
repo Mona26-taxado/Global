@@ -32,6 +32,6 @@ export async function ensureDemoNetwork(count = 250) {
         }
       }
     }
-    await placeUser(user.id, baseId);
+    await placeUser(user.id, baseId, { allowUnpaidInsert: true });
   }
 }
