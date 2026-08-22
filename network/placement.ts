@@ -118,7 +118,7 @@ type WalkMaps = {
 
 /**
  * After a node’s own LEFT then RIGHT holes: entire LEFT subtree, then RIGHT subtree.
- * Not level-order BFS. Tree ROOT still gates ROOT.RIGHT via rootRightIsLegalHole.
+ * PHASE 1 only (ROOT.RIGHT still gated / not yet an ACTIVE occupant).
  */
 function visitPreorder<T>(
   current: Node,
@@ -144,6 +144,48 @@ function visitPreorder<T>(
   return undefined;
 }
 
+/**
+ * PHASE 2: ROOT.RIGHT is unlocked and occupied. Whole opened tree, row-by-row (BFS).
+ * LEFT before RIGHT on the same row. HISTORY is walked for ancestry only.
+ */
+function visitLevelOrder<T>(
+  start: Node,
+  seen: Set<string>,
+  maps: WalkMaps,
+  onActive: (current: Node, kids: { left?: Node; right?: Node }) => T | undefined,
+): T | undefined {
+  const queue: Node[] = [start];
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (seen.has(current.id)) continue;
+    seen.add(current.id);
+    if (occupiesSlot(current)) {
+      const hit = onActive(current, maps.byOcc.get(current.id) ?? {});
+      if (hit !== undefined) return hit;
+    }
+    const walk = maps.byAll.get(current.id) ?? {};
+    if (walk.left) queue.push(walk.left);
+    if (walk.right) queue.push(walk.right);
+  }
+  return undefined;
+}
+
+function phase2LevelOrder(root: Node, nodes: Node[], ids: Set<string>) {
+  return isForestRoot(root, ids) && rootSecondLegUnlocked(nodes, root.id);
+}
+
+function walkFirstEmpty<T>(
+  root: Node,
+  seen: Set<string>,
+  maps: WalkMaps,
+  onActive: (current: Node, kids: { left?: Node; right?: Node }) => T | undefined,
+) {
+  if (phase2LevelOrder(root, maps.nodes, maps.ids)) {
+    return visitLevelOrder(root, seen, maps, onActive);
+  }
+  return visitPreorder(root, seen, maps, onActive);
+}
+
 function walkMaps(nodes: Node[]): WalkMaps {
   return {
     nodes,
@@ -154,10 +196,10 @@ function walkMaps(nodes: Node[]): WalkMaps {
 }
 
 /**
- * First empty Global seat. Non-root parents: LEFT then RIGHT.
- * Tree ROOT: LEFT first; RIGHT only after one-time first-leg unlock.
- * Then left subtree before right subtree. Walk HISTORY for order only.
- * Holes attach under ACTIVE.
+ * First empty Global seat.
+ * PHASE 1: ROOT.LEFT, that member’s immediate LEFT then RIGHT, then ROOT.RIGHT (one-time unlock).
+ * PHASE 2: after ROOT.RIGHT is unlocked and ACTIVE, whole-tree level order (top to bottom, LEFT to RIGHT).
+ * Holes attach under ACTIVE. HISTORY is walked for order only and never occupies.
  */
 export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {
   const occupying = liveNodes(nodes);
@@ -168,14 +210,15 @@ export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {
   const roots = placementRoots(nodes);
   if (!roots.length) throw new Error("NETWORK_CORRUPT");
   const seen = new Set<string>();
+  const onActive = (current: Node, kids: { left?: Node; right?: Node }) => {
+    if (!kids.left) return makeHole(current, "LEFT", userId);
+    if (!kids.right && rootRightIsLegalHole(current, maps.nodes, maps.ids)) {
+      return makeHole(current, "RIGHT", userId);
+    }
+    return undefined;
+  };
   for (const root of roots) {
-    const hole = visitPreorder(root, seen, maps, (current, kids) => {
-      if (!kids.left) return makeHole(current, "LEFT", userId);
-      if (!kids.right && rootRightIsLegalHole(current, maps.nodes, maps.ids)) {
-        return makeHole(current, "RIGHT", userId);
-      }
-      return undefined;
-    });
+    const hole = walkFirstEmpty(root, seen, maps, onActive);
     if (hole) return hole;
   }
   throw new Error("NETWORK_FULL_UNEXPECTED");
@@ -194,7 +237,7 @@ export function occupyingSeatsAfterEarlierHole(nodes: Node[]): Set<string> {
   const legacy = new Set<string>();
   let holeSeen = false;
   for (const root of roots) {
-    visitPreorder(root, seen, maps, (current, kids) => {
+    walkFirstEmpty(root, seen, maps, (current, kids) => {
       if (!kids.left) holeSeen = true;
       else if (holeSeen) legacy.add(kids.left.id);
       if (!kids.right) {

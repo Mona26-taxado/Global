@@ -70,7 +70,7 @@ describe("leg-first Global allocator", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("CASE 5: after ROOT.RIGHT opens, left subtree before right subtree, LEFT before RIGHT", () => {
+  it("CASE 5: after ROOT.RIGHT is ACTIVE, complete that row before deeper LEFT-subtree holes", () => {
     const nodes = [
       n("root", "ROOT", null, null, 0),
       n("A", "A", "root", "LEFT", 1),
@@ -79,12 +79,33 @@ describe("leg-first Global allocator", () => {
       n("C", "C", "A", "RIGHT", 2),
     ];
     const hole = holeOf(nodes);
-    expect(hole.parent_id).toBe("B");
+    expect(hole.parent_id).toBe("D");
     expect(hole.position).toBe("LEFT");
-    const withB = [...nodes, n("BL", "BL", "B", "LEFT", 3)];
-    const next = holeOf(withB);
-    expect(next.parent_id).toBe("B");
+    const withDL = [...nodes, n("DL", "DL", "D", "LEFT", 2)];
+    const next = holeOf(withDL);
+    expect(next.parent_id).toBe("D");
     expect(next.position).toBe("RIGHT");
+    const withBoth = [...withDL, n("DR", "DR", "D", "RIGHT", 2)];
+    const deeper = holeOf(withBoth);
+    expect(deeper.parent_id).toBe("B");
+    expect(deeper.position).toBe("LEFT");
+  });
+
+  it("CASE 5b: unlocked HISTORY left-head + ACTIVE ROOT.RIGHT → ROOT.RIGHT.LEFT before deeper 2575.LEFT", () => {
+    const nodes = [
+      n("old-root", "u2575", null, null, 0, "HISTORY"),
+      n("old-left", "ue8e1", "old-root", "LEFT", 1, "HISTORY"),
+      n("n2575", "u2575", "old-left", "LEFT", 2),
+      n("nffe0", "uffe0", "old-left", "RIGHT", 2),
+      n("ne727", "ue727", "old-root", "RIGHT", 1),
+    ];
+    expect(rootSecondLegUnlocked(nodes, "old-root")).toBe(true);
+    const hole = holeOf(nodes);
+    expect(hole.parent_id).toBe("ne727");
+    expect(hole.position).toBe("LEFT");
+    const withLeft = [...nodes, n("e727L", "x", "ne727", "LEFT", 2)];
+    expect(holeOf(withLeft).parent_id).toBe("ne727");
+    expect(holeOf(withLeft).position).toBe("RIGHT");
   });
 
   it("CASE 6: A.LEFT RESERVED + A.RIGHT ACTIVE → ROOT.RIGHT locked", () => {

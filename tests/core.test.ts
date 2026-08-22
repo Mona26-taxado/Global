@@ -160,7 +160,7 @@ describe("global placement (ROOT-level leg-first)", () => {
     expect(hole.position).toBe("LEFT");
   });
 
-  it("X complete → next empty is in X’s LEFT subtree before Y (left subtree before right)", () => {
+  it("X complete and ROOT.RIGHT ACTIVE → Y.RIGHT (same row) before X’s deeper LEFT subtree", () => {
     const nodes = [
       { id: "pos-ROOT", user_id: "ROOT", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-ROOT", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
@@ -170,8 +170,8 @@ describe("global placement (ROOT-level leg-first)", () => {
       { id: "pos-C", user_id: "C", parent_id: "pos-Y", position: "LEFT" as const, depth: 2, status: "ACTIVE" as const },
     ];
     const hole = findReentryPlacement(nodes, "X");
-    expect(hole.parent_id).toBe("pos-A");
-    expect(hole.position).toBe("LEFT");
+    expect(hole.parent_id).toBe("pos-Y");
+    expect(hole.position).toBe("RIGHT");
   });
 
   it("does not skip an earlier same-level empty after HISTORY parents drop out of live", () => {
@@ -254,7 +254,7 @@ describe("global placement (ROOT-level leg-first)", () => {
     expect(occupyingSeatsAfterEarlierHole(nodes)).toEqual(new Set(["pos_ad98381513d44897"]));
   });
 
-  it("simulate: ffe0 on 2575.RIGHT completes 2575; next empty is 99ab.LEFT (left subtree first)", () => {
+  it("simulate: ffe0 on 2575.RIGHT completes 2575; next empty is 3026.LEFT (same row before deeper 99ab.LEFT)", () => {
     const plan = "PLAN_100";
     const row = (
       id: string,
@@ -312,7 +312,7 @@ describe("global placement (ROOT-level leg-first)", () => {
     } as unknown as Store;
     expect(cycleComplete(store.network_positions, "pos_2575")).toBe(true);
     const next = findPlacement(store.network_positions, "u2575");
-    expect(next.parent_id).toBe("pos_99ab");
+    expect(next.parent_id).toBe("pos_3026");
     expect(next.position).toBe("LEFT");
     const reserved = qualifyForReentryInStore(store, "u2575", plan);
     expect(reserved?.status).toBe("ACTIVE");
