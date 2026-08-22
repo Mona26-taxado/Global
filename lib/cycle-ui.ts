@@ -210,6 +210,51 @@ export function liveForestRoots(tree: NetNode[]): NetNode[] {
     .sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
 }
 
+/**
+ * HISTORY that lost LEFT/RIGHT to an occupying seat. Display under that slot (WAS),
+ * not as a second tree beside the live parent.
+ */
+export function displacedHistoryByParent(tree: NetNode[]): Map<string, ChildSlots> {
+  const liveSlots = childSlotsByParent(tree);
+  const ids = new Set(tree.map((n) => n.id));
+  const out = new Map<string, ChildSlots>();
+  for (const n of tree) {
+    if ((n.status ?? "ACTIVE") !== "HISTORY") continue;
+    if (!n.parent_id || !ids.has(n.parent_id)) continue;
+    const occupying = liveSlots.get(n.parent_id);
+    const winner = n.position === "LEFT" ? occupying?.left : n.position === "RIGHT" ? occupying?.right : undefined;
+    if (!winner || winner.id === n.id || occupyRank(winner) < 2) continue;
+    const slot = out.get(n.parent_id) ?? {};
+    if (n.position === "LEFT") slot.left = n;
+    if (n.position === "RIGHT") slot.right = n;
+    out.set(n.parent_id, slot);
+  }
+  return out;
+}
+
+function underDisplacedHistory(tree: NetNode[], node: NetNode, displacedIds: Set<string>) {
+  const byId = new Map(tree.map((n) => [n.id, n]));
+  const seen = new Set<string>();
+  let pid = node.parent_id;
+  while (pid && !seen.has(pid)) {
+    seen.add(pid);
+    if (displacedIds.has(pid)) return true;
+    pid = byId.get(pid)?.parent_id ?? null;
+  }
+  return false;
+}
+
+/** One pyramid: live occupying roots only. Displaced HISTORY stays under that LEFT/RIGHT as WAS. */
+export function layoutForestRoots(tree: NetNode[]): NetNode[] {
+  const displaced = displacedHistoryByParent(tree);
+  const displacedIds = new Set<string>();
+  for (const slot of displaced.values()) {
+    if (slot.left) displacedIds.add(slot.left.id);
+    if (slot.right) displacedIds.add(slot.right.id);
+  }
+  return liveForestRoots(tree).filter((n) => !displacedIds.has(n.id) && !underDisplacedHistory(tree, n, displacedIds));
+}
+
 /** HISTORY seats behind a live node, oldest first. Uses stored from_position_id only — never invents rows. */
 export function previousHistoryChain(
   live: Pick<NetNode, "id" | "from_position_id">,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, displacedHistoryByParent, journeyCounts, layoutForestRoots, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -148,6 +148,21 @@ describe("buildPositionJourney", () => {
     expect(kids.get("pos_user_6ed8e4893670db32")?.left?.id).toBe("pos_938a4b2c3b7e5eb6");
     expect(kids.get("pos_user_6ed8e4893670db32")?.right?.id).toBe("pos_a9e48adb3b386daa");
     expect(kids.get("pos_938a4b2c3b7e5eb6")?.left?.id).toBe(live.id);
+  });
+
+  it("does not draw displaced HISTORY as a second root beside the live parent", () => {
+    const tree: NetNode[] = [
+      { id: "pos-root", user_id: "global", parent_id: null, position: null, depth: 0, status: "ACTIVE" },
+      { id: "pos-hist-left", user_id: "e8e1", parent_id: "pos-root", position: "LEFT", depth: 1, status: "HISTORY" },
+      { id: "pos-rsv-left", user_id: "99ab", parent_id: "pos-root", position: "LEFT", depth: 1, status: "RESERVED" },
+      { id: "pos-right", user_id: "e727", parent_id: "pos-root", position: "RIGHT", depth: 1, status: "ACTIVE" },
+      { id: "pos-ffe0", user_id: "ffe0", parent_id: "pos-hist-left", position: "RIGHT", depth: 2, status: "ACTIVE" },
+    ];
+    expect(liveForestRoots(tree).map((r) => r.id).sort()).toEqual(["pos-hist-left", "pos-root"]);
+    expect(layoutForestRoots(tree).map((r) => r.id)).toEqual(["pos-root"]);
+    expect(displacedHistoryByParent(tree).get("pos-root")?.left?.id).toBe("pos-hist-left");
+    expect(childSlotsByParent(tree).get("pos-root")?.left?.id).toBe("pos-rsv-left");
+    expect(childSlotsByParent(tree).get("pos-hist-left")?.right?.id).toBe("pos-ffe0");
   });
 });
 

@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
 import { occupyingSeatsAfterEarlierHole, type Node as PlacementNode } from "@/network/placement";
-import { buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, liveApiSeats, liveForestRoots, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, displacedHistoryByParent, journeyCounts, layoutForestRoots, liveApiSeats, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import {
   TREE_MAX_SCALE,
@@ -76,6 +76,8 @@ type VisNode = {
   node?: NetNode;
   left?: VisNode;
   right?: VisNode;
+  /** Old HISTORY seat that occupied this LEFT/RIGHT before the live winner. */
+  was?: VisNode;
 };
 
 type Placed = { vis: VisNode; x: number; y: number };
@@ -100,7 +102,14 @@ function initials(code?: string) {
   return c.slice(0, 2).toUpperCase();
 }
 
-function toVis(node: NetNode, byParent: Map<string, { left?: NetNode; right?: NetNode }>, depth: number, maxDepth: number, visited: Set<string>): VisNode {
+function toVis(
+  node: NetNode,
+  byParent: Map<string, { left?: NetNode; right?: NetNode }>,
+  displaced: Map<string, { left?: NetNode; right?: NetNode }>,
+  depth: number,
+  maxDepth: number,
+  visited: Set<string>,
+): VisNode {
   const vis: VisNode = {
     key: node.id,
     kind: "member",
@@ -110,17 +119,28 @@ function toVis(node: NetNode, byParent: Map<string, { left?: NetNode; right?: Ne
   if (visited.has(node.id)) return vis;
   visited.add(node.id);
   if (maxDepth !== Infinity && depth >= maxDepth) return vis;
+  const loser =
+    node.position === "LEFT"
+      ? displaced.get(node.parent_id ?? "")?.left
+      : node.position === "RIGHT"
+        ? displaced.get(node.parent_id ?? "")?.right
+        : undefined;
+  if (loser && loser.id !== node.id) {
+    vis.was = toVis(loser, byParent, displaced, depth + 1, maxDepth, visited);
+    return vis;
+  }
   const kids = byParent.get(node.id) ?? {};
   vis.left = kids.left
-    ? toVis(kids.left, byParent, depth + 1, maxDepth, visited)
+    ? toVis(kids.left, byParent, displaced, depth + 1, maxDepth, visited)
     : { key: `${node.id}-empty-L`, kind: "empty", position: "LEFT" };
   vis.right = kids.right
-    ? toVis(kids.right, byParent, depth + 1, maxDepth, visited)
+    ? toVis(kids.right, byParent, displaced, depth + 1, maxDepth, visited)
     : { key: `${node.id}-empty-R`, kind: "empty", position: "RIGHT" };
   return vis;
 }
 
 function measure(v: VisNode): number {
+  if (v.was) return Math.max(NODE_W, measure(v.was));
   if (!v.left && !v.right) return NODE_W;
   const lw = v.left ? measure(v.left) : 0;
   const rw = v.right ? measure(v.right) : 0;
@@ -128,9 +148,18 @@ function measure(v: VisNode): number {
   return Math.max(NODE_W, lw + gap + rw);
 }
 
+function visLayoutChildren(v: VisNode): VisNode[] {
+  if (v.was) return [v.was];
+  return [v.left, v.right].filter((c): c is VisNode => Boolean(c));
+}
+
 function place(v: VisNode, originX: number, depth: number, out: Placed[]) {
   const w = measure(v);
   out.push({ vis: v, x: originX + w / 2, y: depth * (NODE_H + V_GAP) });
+  if (v.was) {
+    place(v.was, originX, depth + 1, out);
+    return;
+  }
   const lw = v.left ? measure(v.left) : 0;
   if (v.left) place(v.left, originX, depth + 1, out);
   if (v.right) place(v.right, originX + lw + (v.left ? H_GAP : 0), depth + 1, out);
@@ -411,12 +440,13 @@ export function GlobalNetworkTree({
     [liveTree],
   );
   const maxDepth = levels === "all" ? Infinity : levels;
-  const roots = useMemo(() => liveForestRoots(displayTree), [displayTree]);
+  const roots = useMemo(() => layoutForestRoots(displayTree), [displayTree]);
 
   const visRoots = useMemo(() => {
     const byParent = childSlotsByParent(displayTree);
+    const displaced = displacedHistoryByParent(displayTree);
     const visited = new Set<string>();
-    return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
+    return roots.map((r) => toVis(r, byParent, displaced, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
   }, [displayTree, roots, maxDepth]);
 
   const placed = useMemo(() => {
@@ -811,7 +841,8 @@ export function GlobalNetworkTree({
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
           <p className="mt-1 max-w-2xl text-sm text-secondary">
-            Existing confirmed positions remain unchanged. Previous seats stay visible as HISTORY. Current seats are ACTIVE.
+            Existing confirmed positions remain unchanged. The live tree is one pyramid (root, then LEFT and RIGHT).
+            Previous seats stay under that same LEFT/RIGHT as HISTORY / WAS — not beside the root. Current seats are ACTIVE.
             Unpaid re-entry shows as RESERVED on the real next parent (first-empty: top to bottom, LEFT then RIGHT).
           </p>
         </div>
@@ -968,10 +999,9 @@ export function GlobalNetworkTree({
                       <svg className="absolute inset-0" width={canvasW} height={canvasH}>
                         {placed.map((p) => {
                           if (p.vis.kind !== "member" || !p.vis.node) return null;
-                          const kids = placed.filter((c) => {
-                            if (c.vis.kind === "member") return c.vis.node?.parent_id === p.vis.node?.id;
-                            return c.vis.key.startsWith(`${p.vis.node?.id}-empty`);
-                          });
+                          const kids = visLayoutChildren(p.vis)
+                            .map((child) => placed.find((c) => c.vis.key === child.key))
+                            .filter((c): c is Placed => Boolean(c));
                           return kids.map((c) => {
                             const x1 = p.x;
                             const y1 = p.y + NODE_H;
