@@ -54,7 +54,7 @@ export type PlanGlobalBackfillAudit = {
   waiting_not_qualified: { referral_code: string; user_id: string; reason: string }[];
   plan_100_position_ids_before: string[];
   plan_100_position_ids_after_preview: string[];
-  plan_100_changes: "NONE";
+  plan_100_changes: "NONE" | "UNEXPECTED_CHANGE";
   confirmed_transactions_rewritten: "NONE";
   transactions_count_before: number;
   transactions_count_after_preview: number;
