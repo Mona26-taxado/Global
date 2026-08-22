@@ -823,12 +823,6 @@ export function GlobalNetworkTree({
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
-          <p className="mt-1 max-w-2xl text-sm text-secondary">
-            Existing confirmed positions remain unchanged. The live tree is one pyramid (root, then LEFT and RIGHT).
-            Previous seats stay under that same LEFT/RIGHT as HISTORY / WAS — not beside the root. Current seats are ACTIVE.
-            Current seats are ACTIVE only. Quoted unpaid placements are listed as pending — they do not occupy EMPTY slots
-            (first-empty: ROOT.LEFT, that member’s LEFT+RIGHT, then ROOT.RIGHT stays unlocked).
-          </p>
         </div>
       </div>
       {pendingPlacements.length > 0 && (
