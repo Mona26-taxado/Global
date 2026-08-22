@@ -1,8 +1,19 @@
-import { bothLegsFilled, cycleComplete, findFirstEmptyPlacement, liveNodes } from "@/network/placement";
+import { cycleComplete, findFirstEmptyPlacement, liveNodes } from "@/network/placement";
 import { makeReferralCode, newId, readStore, supabaseEnabled, withStore } from "@/lib/store";
 import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
 import { basePlan } from "@/lib/plan-progress";
+import {
+  confirmDirect2FromIntent,
+  confirmReentryFromIntent,
+  failPendingIntents,
+  findPendingIntent,
+  intentPayee,
+  maybeQueueAncestorReentryIntents,
+  pendingPlacementsForPlan,
+  quoteDirect2InStore,
+  quoteReentryInStore,
+} from "@/services/placement-intent";
 
 export { bothLegsFilled, cycleComplete } from "@/network/placement";
 export const DIRECT_REFERRAL_LIMIT = 2;
@@ -40,9 +51,9 @@ export function reservedPosition(positions: NetworkPositionRow[], userId: string
   );
 }
 
-/** Current Global seat that occupies a slot (ACTIVE, else unpaid RESERVED snapshot). */
+/** Current Global seat that occupies a slot (ACTIVE only). */
 export function occupyingPosition(positions: NetworkPositionRow[], userId: string, planId?: string) {
-  return currentPosition(positions, userId, planId) ?? reservedPosition(positions, userId, planId);
+  return currentPosition(positions, userId, planId);
 }
 
 function resolvePlanId(store: StoreShape, planId?: string) {
@@ -150,6 +161,9 @@ function insertPosition(
     plan_id: string;
   },
 ): NetworkPositionRow {
+  if (extra.status === "RESERVED") {
+    throw new Error("PREPARE_MUST_NOT_INSERT_POSITION");
+  }
   if (extra.status === "ACTIVE" && extra.funded_by_user_id) {
     throw new Error("DIRECT2_MUST_NOT_INSERT_ACTIVE");
   }
@@ -181,145 +195,56 @@ function insertActivePosition(store: StoreShape, userId: string, planId: string)
   return insertPosition(store, userId, { status: "ACTIVE", plan_id: planId, started_at: nowIso() });
 }
 
-function parentUserId(store: StoreShape, parentPositionId: string | null) {
-  if (!parentPositionId) return null;
-  return store.network_positions.find((p) => p.id === parentPositionId)?.user_id ?? null;
-}
-
-function verifiedWalletAddress(store: StoreShape, userId: string | null) {
-  if (!userId) return null;
-  const w = store.wallets.find((x) => x.user_id === userId && x.verified);
-  return w?.address?.toLowerCase() ?? null;
-}
-
 export function qualifyForReentryInStore(
   store: StoreShape,
   userId: string,
   planId?: string,
-  opts?: { occupyingOk?: boolean },
 ): NetworkPositionRow | null {
   const plan = resolvePlanId(store, planId ?? currentPosition(store.network_positions, userId)?.plan_id);
-  const already = reservedPosition(store.network_positions, userId, plan);
-  if (already) return already;
   const current = currentPosition(store.network_positions, userId, plan);
   if (!current) return null;
   const scoped = positionsForPlan(store.network_positions, plan);
-  const complete = opts?.occupyingOk ? bothLegsFilled(scoped, current.id) : cycleComplete(scoped, current.id);
-  if (!complete) return current;
-  const reserved = insertPosition(store, userId, {
-    status: "RESERVED",
-    plan_id: plan,
-    from_position_id: current.id,
-    reentry_tx_hash: null,
-  });
-  const recipientUserId = parentUserId(store, reserved.parent_id);
-  reserved.recipient_user_id = recipientUserId;
-  reserved.recipient_wallet = verifiedWalletAddress(store, recipientUserId);
-  return reserved;
+  if (!cycleComplete(scoped, current.id)) return current;
+  try {
+    quoteReentryInStore(store, userId, plan);
+  } catch {
+    /* eligibility still cycleComplete; missing wallet/funded cycle */
+  }
+  return current;
 }
 
 export function activateReservedReentryInStore(store: StoreShape, userId: string, txHash: string, planId?: string) {
-  const plan = resolvePlanId(store, planId ?? reservedPosition(store.network_positions, userId)?.plan_id);
-  const reserved = reservedPosition(store.network_positions, userId, plan);
-  if (!reserved) return currentPosition(store.network_positions, userId, plan);
-  const old =
-    store.network_positions.find((p) => p.id === reserved.from_position_id) ??
-    currentPosition(store.network_positions, userId, plan);
-  if (old && old.id !== reserved.id && (old.status ?? "ACTIVE") === "ACTIVE") {
-    old.status = "HISTORY";
-    old.ended_at = nowIso();
-  }
-  reserved.status = "ACTIVE";
-  reserved.started_at = reserved.started_at ?? nowIso();
-  reserved.ended_at = null;
-  reserved.reentry_tx_hash = txHash;
-  maybeReenterAncestors(store, reserved);
-  return reserved;
+  const plan = resolvePlanId(store, planId ?? currentPosition(store.network_positions, userId)?.plan_id);
+  const intent = findPendingIntent(store, "GLOBAL_REENTRY", userId, plan);
+  if (!intent) return currentPosition(store.network_positions, userId, plan);
+  return confirmReentryFromIntent(store, userId, plan, txHash, intentPayee(intent));
 }
 
-function maybeReenterAncestors(store: StoreShape, child: NetworkPositionRow, occupyingOk = false) {
-  let parentId = child.parent_id;
-  while (parentId) {
-    const parentPos = store.network_positions.find((p) => p.id === parentId);
-    if (!parentPos) return;
-    if ((parentPos.status ?? "ACTIVE") === "ACTIVE") {
-      const scoped = positionsForPlan(store.network_positions, child.plan_id);
-      const complete = occupyingOk ? bothLegsFilled(scoped, parentPos.id) : cycleComplete(scoped, parentPos.id);
-      if (complete) {
-        qualifyForReentryInStore(store, parentPos.user_id, child.plan_id, occupyingOk ? { occupyingOk: true } : undefined);
-      }
-    }
-    parentId = parentPos.parent_id;
-  }
+function maybeReenterAncestors(store: StoreShape, child: NetworkPositionRow) {
+  maybeQueueAncestorReentryIntents(store, child);
 }
 
-function voidReservedSeat(row: NetworkPositionRow) {
-  row.status = "HISTORY";
-  row.ended_at = nowIso();
-}
-
-/** Direct #2 PREPARE: occupy first-empty as RESERVED. Never ACTIVE. */
+/** Direct #2 PREPARE: quote only. Never inserts a network_position. */
 export function provisionDirect2SponsorInStore(
   store: StoreShape,
   sponsorId: string,
   planId: string,
   buyerId: string,
-): NetworkPositionRow {
-  const plan = resolvePlanId(store, planId);
-  const existingActive = currentPosition(store.network_positions, sponsorId, plan);
-  if (existingActive) {
-    maybeReenterAncestors(store, existingActive, true);
-    return existingActive;
-  }
-  const existingReserved = reservedPosition(store.network_positions, sponsorId, plan);
-  if (existingReserved) {
-    if (!existingReserved.funded_by_user_id) existingReserved.funded_by_user_id = buyerId;
-    maybeReenterAncestors(store, existingReserved, true);
-    return existingReserved;
-  }
-  const row = insertPosition(store, sponsorId, {
-    status: "RESERVED",
-    plan_id: plan,
-    funded_by_user_id: buyerId,
-    reentry_tx_hash: null,
-  });
-  if ((row.status ?? "ACTIVE") === "ACTIVE") {
-    throw new Error("DIRECT2_PREPARE_MUST_NOT_ACTIVATE");
-  }
-  maybeReenterAncestors(store, row, true);
-  return row;
+) {
+  return quoteDirect2InStore(store, sponsorId, resolvePlanId(store, planId), buyerId);
 }
 
-/** After CONFIRMED Direct #2 plan transfer: activate sponsor snapshot, then any funded cycle movement. */
+/** After CONFIRMED Direct #2: atomic first-empty check then ACTIVE. */
 export function finalizeConfirmedDirect2InStore(store: StoreShape, buyerId: string, planId: string, txHash: string) {
-  const buyer = store.users.find((u) => u.id === buyerId);
-  if (!buyer?.sponsor_id) return;
   const plan = resolvePlanId(store, planId);
-  const sponsorReserved = reservedPosition(store.network_positions, buyer.sponsor_id, plan);
-  if (sponsorReserved && !sponsorReserved.from_position_id) {
-    activateReservedReentryInStore(store, buyer.sponsor_id, txHash, plan);
-  }
-  const movement = store.network_positions.find(
-    (p) =>
-      p.plan_id === plan &&
-      p.status === "RESERVED" &&
-      p.funded_by_user_id === buyerId &&
-      Boolean(p.from_position_id),
-  );
-  if (movement) {
-    activateReservedReentryInStore(store, movement.user_id, txHash, plan);
-  }
+  const intent = findPendingIntent(store, "DIRECT2_PLACEMENT", buyerId, plan);
+  if (!intent) return;
+  confirmDirect2FromIntent(store, buyerId, plan, txHash, intentPayee(intent));
 }
 
-/** Failed/cancelled Direct #2: drop unpaid RESERVED snapshots. Never rewrite CONFIRMED txs. */
+/** Failed/cancelled Direct #2: expire intent only. Tree unchanged. Never rewrite CONFIRMED txs. */
 export function voidUnpaidDirect2ProvisionInStore(store: StoreShape, buyerId: string, planId?: string) {
-  for (const row of store.network_positions) {
-    if (row.status !== "RESERVED") continue;
-    if (row.funded_by_user_id !== buyerId) continue;
-    if (row.reentry_tx_hash) continue;
-    if (planId && row.plan_id !== planId) continue;
-    voidReservedSeat(row);
-  }
+  failPendingIntents(store, buyerId, planId, "FAILED");
 }
 
 export function assertRegistrationDidNotCreateGlobal(store: StoreShape, userId: string, positionIdsBefore: Set<string>) {
@@ -368,12 +293,13 @@ export async function promoteIfGlobalLegsComplete(userId: string, planId?: strin
 export async function getNetwork(planId?: string) {
   const store = await readStore();
   const plan = resolvePlanId(store, planId);
-  return positionsForPlan(store.network_positions, plan)
-    .filter((p) => (p.status ?? "ACTIVE") === "ACTIVE" || p.status === "RESERVED")
+  const tree = positionsForPlan(store.network_positions, plan)
+    .filter((p) => (p.status ?? "ACTIVE") === "ACTIVE")
     .map((p) => ({
       ...p,
       user: store.users.find((u) => u.id === p.user_id),
     }));
+  return { tree, pending_placements: pendingPlacementsForPlan(store, plan) };
 }
 
 export async function getDownline(userId: string, planId?: string) {

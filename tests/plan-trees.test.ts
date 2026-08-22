@@ -206,11 +206,13 @@ describe("plan-scoped Global trees", () => {
     const r2 = await qualifyForReentry("user_x", "P2");
     const pay2 = await resolveReentryPayment("user_x", "P2");
     expect(pay2.amountUsd).toBe(200);
+    expect(r1?.plan_id).toBe("P1");
     expect(r2?.plan_id).toBe("P2");
-    expect(r1?.id).not.toBe(r2?.id);
+    expect(r1?.id).not.toBeUndefined();
     const store = await readStore();
-    expect(reservedPosition(store.network_positions, "user_x", "P1")?.id).toBe(r1?.id);
-    expect(reservedPosition(store.network_positions, "user_x", "P2")?.id).toBe(r2?.id);
+    expect(reservedPosition(store.network_positions, "user_x", "P1")).toBeNull();
+    expect(reservedPosition(store.network_positions, "user_x", "P2")).toBeNull();
+    expect(store.payment_intents.filter((i) => i.kind === "GLOBAL_REENTRY" && i.status === "PENDING")).toHaveLength(2);
     expect(currentPosition(store.network_positions, "user_x", "P1")?.status ?? "ACTIVE").toBe("ACTIVE");
     expect(currentPosition(store.network_positions, "user_x", "P2")?.status ?? "ACTIVE").toBe("ACTIVE");
   });

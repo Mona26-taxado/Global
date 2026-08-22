@@ -9,7 +9,7 @@ import {
 } from "@/lib/network-config";
 import { newId, readStore, withStore } from "@/lib/store";
 import { parsePaymentType } from "@/payments/payment-type";
-import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment, unpaidDirect2Funder } from "@/payments/plan-routing";
+import { PlanRoutingError, resolvePlanRecipient, resolveReentryPayment } from "@/payments/plan-routing";
 import {
   activateReservedReentry,
   assertRegistrationDidNotCreateGlobal,
@@ -17,9 +17,9 @@ import {
   currentPosition,
   finalizeConfirmedDirect2Placement,
   positionsForPlan,
-  reservedPosition,
   voidUnpaidDirect2Provision,
 } from "@/services/users";
+import { findPendingIntent, intentPayee, PlacementError } from "@/services/placement-intent";
 import {
   hasConfirmedPlan,
   isPlanUnlocked,
@@ -98,6 +98,7 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
       directNumber: null as 1 | 2 | null,
       globalParentUserId: null as string | null,
       positionId: null as string | null,
+      intentId: null as string | null,
       notice:
         "TESTNET. $5 registration always goes to the company address. Connect Wallet never creates this transfer. Registration never creates a Global position.",
     };
@@ -110,6 +111,31 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
       throw new Error("Complete $5 registration first. Plans unlock only after registration is ACTIVE.");
     }
     const planId = opts?.planId ?? parsedType.planId;
+    if (opts?.forConfirm && planId) {
+      const stored = findPendingIntent(await readStore(), "GLOBAL_REENTRY", userId, planId);
+      if (stored) {
+        const plan = (await readStore()).plans.find((p) => p.id === stored.plan_id);
+        return {
+          paymentType: "GLOBAL_REENTRY" as const,
+          planId: stored.plan_id,
+          planCode: plan?.code ?? stored.plan_id,
+          chainId: activeChainId(),
+          tokenContract: token,
+          recipient: intentPayee(stored),
+          amountUsd: stored.amount_usd,
+          amountUnits: amountToUnits(stored.amount_usd).toString(),
+          decimals: 6,
+          symbol: "USDT",
+          recipientRole: "GLOBAL_REENTRY" as const,
+          slot: null as 1 | 2 | null,
+          directNumber: null as 1 | 2 | null,
+          globalParentUserId: stored.candidate_recipient_user_id,
+          positionId: null as string | null,
+          intentId: stored.id,
+          notice: "Quoted re-entry route (not refreshed).",
+        };
+      }
+    }
     const routed = await resolveReentryPayment(userId, planId);
     return {
       paymentType: "GLOBAL_REENTRY" as const,
@@ -127,6 +153,7 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
       directNumber: routed.directNumber,
       globalParentUserId: routed.globalParentUserId,
       positionId: routed.positionId ?? null,
+      intentId: routed.intentId ?? null,
       notice: routed.notice,
     };
   }
@@ -143,6 +170,31 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
     (t) => t.user_id === userId && t.plan_id === plan.id && t.status === "CONFIRMED",
   );
   if (already && !opts?.forConfirm) throw new Error("PLAN_ALREADY_ACTIVE");
+
+  if (opts?.forConfirm) {
+    const stored = findPendingIntent(db, "DIRECT2_PLACEMENT", userId, plan.id);
+    if (stored) {
+      return {
+        paymentType: "PLAN_PURCHASE" as const,
+        planId: plan.id,
+        planCode: plan.code,
+        chainId: activeChainId(),
+        tokenContract: token,
+        recipient: intentPayee(stored),
+        amountUsd: plan.amount_usd,
+        amountUnits: amountToUnits(plan.amount_usd).toString(),
+        decimals: 6,
+        symbol: "USDT",
+        recipientRole: "GLOBAL_UPLINE" as const,
+        slot: 2 as const,
+        directNumber: 2 as const,
+        globalParentUserId: stored.movement_recipient_user_id ?? stored.candidate_recipient_user_id,
+        positionId: null as string | null,
+        intentId: stored.id,
+        notice: "Quoted Direct #2 route (not refreshed).",
+      };
+    }
+  }
 
   const routed = await resolvePlanRecipient(userId, plan.id);
   return {
@@ -161,6 +213,7 @@ export async function preparePayment(userId: string, paymentType: string, opts?:
     directNumber: routed.directNumber,
     globalParentUserId: routed.globalParentUserId,
     positionId: routed.positionId ?? null,
+    intentId: routed.intentId ?? null,
     notice: routed.notice,
   };
 }
@@ -242,6 +295,7 @@ export async function confirmPayment(input: {
         direct_number: "directNumber" in prepared ? prepared.directNumber : null,
         global_parent_user_id: "globalParentUserId" in prepared ? prepared.globalParentUserId : null,
         position_id: "positionId" in prepared ? prepared.positionId : null,
+        intent_id: "intentId" in prepared ? prepared.intentId ?? null : null,
         created_at: new Date().toISOString(),
       });
     });
@@ -308,8 +362,20 @@ export async function confirmPayment(input: {
     } else if (prepared.paymentType === "PLAN_PURCHASE" && "positionId" in prepared && prepared.positionId) {
       await activateReservedIfDirect2Funded(prepared.positionId, input.txHash);
     }
-    return { transaction, registration };
+    return { transaction, registration, placement: { ok: true as const } };
   } catch (error) {
+    if (error instanceof PlacementError && (error.code === "STALE_ROUTE" || error.code === "RECIPIENT_CHANGED")) {
+      const transaction = await withStore((store) => {
+        const row = store.transactions.find((t) => t.id === draftId)!;
+        row.placement_status = error.code;
+        return row;
+      });
+      return {
+        transaction,
+        registration: await getRegistration(input.userId),
+        placement: { ok: false as const, code: error.code, message: error.message },
+      };
+    }
     const pending =
       (error instanceof ChainVerifyError && error.code === "PENDING") || isRetryableRpcError(error);
     await withStore((store) => {
@@ -373,12 +439,20 @@ export async function listUserPlans(userId: string) {
     const membership = Boolean(tx);
     const unlocked = isPlanUnlocked(store.plans, store.transactions, userId, plan.id);
     const pos = currentPosition(store.network_positions, userId, plan.id);
-    const reserved = reservedPosition(store.network_positions, userId, plan.id);
     const missing = directs.filter((d) => !hasConfirmedPlan(store.transactions, d.user_id, plan.id));
     const waiting = membership && !pos;
     const cycleDone = Boolean(pos && cycleComplete(positionsForPlan(store.network_positions, plan.id), pos.id));
-    const fundedByDirect2 = Boolean(reserved?.funded_by_user_id) || Boolean(reserved && unpaidDirect2Funder(store, reserved));
-    const reentryRequired = fundedByDirect2 ? false : Boolean(reserved) || cycleDone;
+    const fundedByDirect2 = Boolean(
+      (store.payment_intents ?? []).some(
+        (i) => i.status === "CONFIRMED" && i.plan_id === plan.id && i.movement_from_position_id === pos?.id,
+      ),
+    );
+    const pendingReentry = Boolean(
+      (store.payment_intents ?? []).some(
+        (i) => i.status === "PENDING" && i.kind === "GLOBAL_REENTRY" && i.plan_id === plan.id && i.mover_user_id === userId,
+      ),
+    );
+    const reentryRequired = fundedByDirect2 ? false : cycleDone || pendingReentry;
     const global_status = planViewState({
       unlocked,
       membership,

@@ -6,7 +6,12 @@ import {
   findReentryPlacement,
   occupyingSeatsAfterEarlierHole,
 } from "../network/placement";
-import { qualifyForReentryInStore } from "../services/users";
+import {
+  finalizeConfirmedDirect2InStore,
+  provisionDirect2SponsorInStore,
+  qualifyForReentryInStore,
+  reservedPosition,
+} from "../services/users";
 import type { Store } from "../lib/store";
 import { amountToUnits } from "../payments/service";
 import { tokenPocketLoginParam } from "../wallet/tokenpocket/deeplink";
@@ -46,7 +51,7 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
     expect(z.position).toBe("LEFT");
   });
 
-  it("CASE 3: RESERVED occupies the slot so the next call cannot take it", () => {
+  it("CASE 3: RESERVED does not occupy, so the next call can take the same hole", () => {
     const nodes: ReturnType<typeof findPlacement>[] = [];
     push(nodes, findPlacement(nodes, "A"), "pos-A");
     const reserved = findPlacement(nodes, "X");
@@ -54,7 +59,7 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
     push(nodes, reserved, "pos-X-reserved", "RESERVED");
     const next = findPlacement(nodes, "Y");
     expect(next.parent_id).toBe("pos-A");
-    expect(next.position).toBe("RIGHT");
+    expect(next.position).toBe("LEFT");
   });
 
   it("does not treat historical seats as live attach points", () => {
@@ -100,15 +105,15 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
     expect(hole.position).toBe("RIGHT");
   });
 
-  it("re-entry CASE 4: RESERVED A.RIGHT is not reused; next is X.LEFT", () => {
+  it("re-entry CASE 4: legacy RESERVED A.RIGHT does not occupy; first-empty is still A.RIGHT", () => {
     const nodes = [
       { id: "pos-A", user_id: "A", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
       { id: "pos-X", user_id: "X", parent_id: "pos-A", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
       { id: "pos-R", user_id: "R", parent_id: "pos-A", position: "RIGHT" as const, depth: 1, status: "RESERVED" as const },
     ];
     const hole = findReentryPlacement(nodes, "M");
-    expect(hole.parent_id).toBe("pos-X");
-    expect(hole.position).toBe("LEFT");
+    expect(hole.parent_id).toBe("pos-A");
+    expect(hole.position).toBe("RIGHT");
   });
 
   it("re-entry CASE 5: plan live sets are independent", () => {
@@ -189,6 +194,33 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
     expect(cycleComplete(oneLegPlusDownline, "pos-A")).toBe(false);
   });
 
+  it("LEFT RESERVED + RIGHT ACTIVE => cycle false", () => {
+    const nodes = [
+      { id: "pos-X", user_id: "X", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-L", user_id: "L", parent_id: "pos-X", position: "LEFT" as const, depth: 1, status: "RESERVED" as const },
+      { id: "pos-R", user_id: "R", parent_id: "pos-X", position: "RIGHT" as const, depth: 1, status: "ACTIVE" as const },
+    ];
+    expect(cycleComplete(nodes, "pos-X")).toBe(false);
+  });
+
+  it("LEFT ACTIVE + RIGHT RESERVED => cycle false", () => {
+    const nodes = [
+      { id: "pos-X", user_id: "X", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-L", user_id: "L", parent_id: "pos-X", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-R", user_id: "R", parent_id: "pos-X", position: "RIGHT" as const, depth: 1, status: "RESERVED" as const },
+    ];
+    expect(cycleComplete(nodes, "pos-X")).toBe(false);
+  });
+
+  it("LEFT ACTIVE + RIGHT ACTIVE => cycle true", () => {
+    const nodes = [
+      { id: "pos-X", user_id: "X", parent_id: null, position: null, depth: 0, status: "ACTIVE" as const },
+      { id: "pos-L", user_id: "L", parent_id: "pos-X", position: "LEFT" as const, depth: 1, status: "ACTIVE" as const },
+      { id: "pos-R", user_id: "R", parent_id: "pos-X", position: "RIGHT" as const, depth: 1, status: "ACTIVE" as const },
+    ];
+    expect(cycleComplete(nodes, "pos-X")).toBe(true);
+  });
+
   it("PLAN_100 audit: 2575.RIGHT is first empty; GXH4QSGA under current e8e1.LEFT is legacy skip", () => {
     const nodes = [
       { id: "pos_user_6ed8e4893670db32", user_id: "u2575", parent_id: null, position: null, depth: 0, status: "HISTORY" as const },
@@ -252,17 +284,15 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
       ],
       users: [],
       plans: [{ id: plan }],
+      payment_intents: [],
     } as unknown as Store;
     expect(cycleComplete(store.network_positions, "pos_2575")).toBe(true);
     const next = findPlacement(store.network_positions, "u2575");
     expect(next.parent_id).toBe("pos_3026");
     expect(next.position).toBe("LEFT");
     const reserved = qualifyForReentryInStore(store, "u2575", plan);
-    expect(reserved?.status).toBe("RESERVED");
-    expect(reserved?.parent_id).toBe("pos_3026");
-    expect(reserved?.position).toBe("LEFT");
-    expect(reserved?.recipient_user_id).toBe("u3026");
-    expect(reserved?.recipient_wallet).toBe("0xbd7509eb24b4f33e3da1310fd9bd3e44f9b23026");
+    expect(reserved?.status).toBe("ACTIVE");
+    expect(store.payment_intents.some((i) => i.kind === "GLOBAL_REENTRY" && i.status === "PENDING")).toBe(true);
   });
 
   it("RESERVED right child does not complete the cycle", () => {
@@ -272,6 +302,125 @@ describe("global placement (first empty LEFT then RIGHT)", () => {
       { id: "pos-A", user_id: "A", parent_id: "pos-X", position: "RIGHT" as const, depth: 1, status: "RESERVED" as const },
     ];
     expect(cycleComplete(nodes, "pos-X")).toBe(false);
+  });
+
+  function pos(
+    id: string,
+    user_id: string,
+    parent_id: string | null,
+    position: "LEFT" | "RIGHT" | null,
+    depth: number,
+    status: NetworkPositionRow["status"],
+  ): NetworkPositionRow {
+    return {
+      id,
+      user_id,
+      plan_id: "PLAN_100",
+      parent_id,
+      position,
+      depth,
+      cycle: Math.floor(depth / 2),
+      status,
+      started_at: "2026-08-22T12:00:00.000Z",
+    };
+  }
+
+  function cycleStore(positions: NetworkPositionRow[]): Store {
+    return {
+      network_positions: positions,
+      payment_intents: [],
+      wallets: [
+        {
+          id: "wal_root",
+          user_id: "u-root",
+          address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          wallet_type: "injected",
+          chain_id: 80002,
+          verified: true,
+          created_at: "2026-08-22T12:00:00.000Z",
+        },
+        {
+          id: "wal_left",
+          user_id: "u-left",
+          address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          wallet_type: "injected",
+          chain_id: 80002,
+          verified: true,
+          created_at: "2026-08-22T12:00:00.000Z",
+        },
+      ],
+      users: [
+        {
+          id: "u-root",
+          referral_code: "GXROOTAA",
+          sponsor_id: null,
+          is_demo: false,
+          display_name: "root",
+          created_at: "2026-08-22T12:00:00.000Z",
+        },
+        {
+          id: "u-left",
+          referral_code: "GXLEFTAA",
+          sponsor_id: null,
+          is_demo: false,
+          display_name: "left",
+          created_at: "2026-08-22T12:00:00.000Z",
+        },
+        {
+          id: "u-sponsor",
+          referral_code: "GXSPONSR",
+          sponsor_id: null,
+          is_demo: false,
+          display_name: "sponsor",
+          created_at: "2026-08-22T12:00:00.000Z",
+        },
+        {
+          id: "u-d2",
+          referral_code: "GXD2AAAA",
+          sponsor_id: "u-sponsor",
+          is_demo: false,
+          display_name: "d2",
+          created_at: "2026-08-22T12:00:00.000Z",
+        },
+      ],
+      plans: [{ id: "PLAN_100" }],
+      referrals: [
+        {
+          id: "ref-d2",
+          user_id: "u-d2",
+          sponsor_id: "u-sponsor",
+          referral_code: "GXSPONSR",
+          direct_number: 2,
+          status: "ACTIVE",
+        },
+      ],
+    } as unknown as Store;
+  }
+
+  it("Direct #2 PREPARE creates RESERVED but does not trigger ancestor cycle", () => {
+    const store = cycleStore([
+      pos("pos-root", "u-root", null, null, 0, "ACTIVE"),
+      pos("pos-left", "u-left", "pos-root", "LEFT", 1, "ACTIVE"),
+    ]);
+    const intent = provisionDirect2SponsorInStore(store, "u-sponsor", "PLAN_100", "u-d2");
+    expect(intent.status).toBe("PENDING");
+    expect(intent.candidate_parent_position_id).toBe("pos-root");
+    expect(intent.candidate_position).toBe("RIGHT");
+    expect(cycleComplete(store.network_positions, "pos-root")).toBe(false);
+    expect(reservedPosition(store.network_positions, "u-root", "PLAN_100")).toBeNull();
+  });
+
+  it("Direct #2 CONFIRM converts RESERVED→ACTIVE and only then may trigger ancestor cycle", () => {
+    const store = cycleStore([
+      pos("pos-root", "u-root", null, null, 0, "ACTIVE"),
+      pos("pos-left", "u-left", "pos-root", "LEFT", 1, "ACTIVE"),
+    ]);
+    provisionDirect2SponsorInStore(store, "u-sponsor", "PLAN_100", "u-d2");
+    expect(reservedPosition(store.network_positions, "u-root", "PLAN_100")).toBeNull();
+    finalizeConfirmedDirect2InStore(store, "u-d2", "PLAN_100", "0xd2confirm");
+    const sponsor = store.network_positions.find((p) => p.user_id === "u-sponsor");
+    expect(sponsor?.status).toBe("ACTIVE");
+    expect(reservedPosition(store.network_positions, "u-root", "PLAN_100")).toBeNull();
   });
 });
 

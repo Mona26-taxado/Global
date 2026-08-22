@@ -8,8 +8,10 @@ export async function GET(req: NextRequest) {
   const store = await readStore();
   const requested = req.nextUrl.searchParams.get("plan_id");
   const planId = requested || basePlan(store.plans)?.id;
+  const net = await getNetwork(planId ?? undefined);
   return jsonOk({
-    tree: await getNetwork(planId ?? undefined),
+    tree: net.tree,
+    pending_placements: net.pending_placements,
     plan_id: planId ?? null,
     plans: store.plans,
     config: store.global_config,

@@ -59,7 +59,14 @@ export function friendlyMessage(raw?: string | null): { title: string; detail: s
   if (/wrong_amount/.test(lower)) {
     return { title: "Amount mismatch", detail: "The on-chain amount did not match the $5 registration fee.", tone: "error" };
   }
-  if (/wrong_recipient/.test(lower)) {
+  if (/stale_route|recipient_changed/.test(lower)) {
+    return {
+      title: "Route changed",
+      detail: "Your quoted Global seat is no longer first-empty. This payment did not place a seat. Prepare a new payment.",
+      tone: "warning",
+    };
+  }
+  if (/wrong_recipient|wrong destination/.test(lower)) {
     return { title: "Wrong destination", detail: "This payment did not go to the GLOBAL X registration address.", tone: "error" };
   }
   if (/pending|not mined|waiting for blockchain|rpc|authenticated/.test(lower)) {

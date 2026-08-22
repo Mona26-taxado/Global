@@ -12,6 +12,7 @@ import {
   type CycleRef,
   type CycleTx,
   type CycleUser,
+  type PendingPlacement,
 } from "@/components/admin/global-network-tree";
 
 type WalletRow = { address: string; user: string | null };
@@ -24,6 +25,7 @@ export default function AdminCyclePage() {
   const [planId, setPlanId] = useState<string>("");
   const [planRows, setPlanRows] = useState<{ id: string; code: string; name: string; amount_usd: number }[]>([]);
   const [tree, setTree] = useState<NetNode[]>([]);
+  const [pendingPlacements, setPendingPlacements] = useState<PendingPlacement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -36,7 +38,7 @@ export default function AdminCyclePage() {
       api<{ ok: boolean; rows: CycleTx[] }>("/api/admin/data?resource=transactions"),
       api<{ ok: boolean; rows: CycleRef[] }>("/api/admin/data?resource=referrals"),
       api<{ ok: boolean; rows: { id: string; code: string; name: string; amount_usd: number }[] }>("/api/admin/data?resource=plans"),
-      api<{ ok: boolean; tree: NetNode[]; plan_id?: string }>(`/api/network${planId ? `?plan_id=${encodeURIComponent(planId)}` : ""}`),
+      api<{ ok: boolean; tree: NetNode[]; pending_placements?: PendingPlacement[]; plan_id?: string }>(`/api/network${planId ? `?plan_id=${encodeURIComponent(planId)}` : ""}`),
     ])
       .then(([u, w, t, r, p, n]) => {
         if (!u.ok || !w.ok || !t.ok || !r.ok || !p.ok || !n.ok) {
@@ -49,6 +51,7 @@ export default function AdminCyclePage() {
         setRefs(r.rows ?? []);
         setPlanRows(p.rows ?? []);
         setTree(n.tree ?? []);
+        setPendingPlacements(n.pending_placements ?? []);
         if (!planId && n.plan_id) setPlanId(n.plan_id);
       })
       .catch(() => setError(true))
@@ -127,6 +130,7 @@ export default function AdminCyclePage() {
           error={error}
           onRetry={load}
           planId={planId}
+          pendingPlacements={pendingPlacements}
         />
       </div>
     </AdminShell>

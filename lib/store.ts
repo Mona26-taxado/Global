@@ -9,6 +9,7 @@ import type {
   PlanRow,
   ReferralRow,
   RegistrationRow,
+  PaymentIntentRow,
   TransactionRow,
   UserRow,
   WalletRow,
@@ -24,6 +25,7 @@ export type Store = {
   registrations: RegistrationRow[];
   plans: PlanRow[];
   transactions: TransactionRow[];
+  payment_intents: PaymentIntentRow[];
   network_positions: NetworkPositionRow[];
   tokenpocket_actions: {
     action_id: string;
@@ -75,6 +77,7 @@ function emptyStore(): Store {
     registrations: [],
     plans: defaultPlans(),
     transactions: [],
+    payment_intents: [],
     network_positions: [],
     tokenpocket_actions: [],
     global_config: DEFAULT_GLOBAL_CONFIG,
@@ -103,6 +106,7 @@ function migrate(store: Store): Store {
     payment_type: t.payment_type ?? (t.plan_code === "REGISTRATION" ? "REGISTRATION" : "PLAN_PURCHASE"),
     plan_id: t.plan_id ?? (t.plan_code && t.plan_code !== "REGISTRATION" ? t.plan_code : null),
   }));
+  if (!store.payment_intents) store.payment_intents = [];
   store.network_positions = (store.network_positions ?? []).map((p) => ({
     ...p,
     plan_id: p.plan_id || baseId,

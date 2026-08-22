@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolvePlanRecipient, resolveReentryPayment } from "../payments/plan-routing";
+import { resolvePlanRecipient } from "../payments/plan-routing";
 import { listUserPlans } from "../payments/service";
 import {
   activateReservedReentry,
@@ -16,8 +16,6 @@ import {
 } from "../services/users";
 import { newId, readStore, withStore } from "../lib/store";
 import { activeChainId } from "../lib/network-config";
-import { occupiesSlot } from "../network/placement";
-
 const dataFile = join(mkdtempSync(join(tmpdir(), "gx-d2-")), "globalx.json");
 
 const ADDR: Record<string, `0x${string}`> = {
@@ -205,6 +203,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
 
     await assignSponsor("user_right_d1", "GXRIGHTA");
     await assignSponsor("user_payer", "GXRIGHTA");
+    await confirmPlan("user_right_d1", ADDR.C);
 
     let store = await readStore();
     const beforeRoot = currentPosition(store.network_positions, "user_root", "PLAN_100");
@@ -215,41 +214,27 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
 
     const pay = await resolvePlanRecipient("user_payer", "PLAN_100");
     expect(pay.slot).toBe(2);
-    expect(pay.recipient.toLowerCase()).toBe(ADDR.E8E1);
     expect(pay.recipientUserId).toBe("user_e8e1");
-    expect(pay.recipient.toLowerCase()).not.toBe(ADDR.ROOT);
+    expect(pay.recipient.toLowerCase()).toBe(ADDR.E8E1);
 
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_right", "PLAN_100")).toBeNull();
-    expect(reservedPosition(store.network_positions, "user_right", "PLAN_100")?.status).toBe("RESERVED");
-    const reserved = reservedPosition(store.network_positions, "user_root", "PLAN_100");
-    expect(reserved?.status).toBe("RESERVED");
-    expect(reserved?.funded_by_user_id).toBe("user_payer");
-    expect(pay.positionId).toBe(reserved?.id);
-    const reservedParent = store.network_positions.find((p) => p.id === reserved?.parent_id);
-    expect(reservedParent?.user_id).toBe("user_e8e1");
-    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
-    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.id).toBe(beforeRoot?.id);
+    expect(reservedPosition(store.network_positions, "user_right", "PLAN_100")).toBeNull();
+    expect(reservedPosition(store.network_positions, "user_root", "PLAN_100")).toBeNull();
+    expect(store.payment_intents.some((i) => i.kind === "DIRECT2_PLACEMENT" && i.status === "PENDING")).toBe(true);
 
-    await expect(resolveReentryPayment("user_root", "PLAN_100")).rejects.toMatchObject({
-      code: "REENTRY_FUNDED_BY_DIRECT2",
-    });
     const views = await listUserPlans("user_root");
     expect(views.find((p) => p.id === "PLAN_100")?.global_status).not.toBe("REENTRY_PAYMENT_REQUIRED");
 
     const retry = await resolvePlanRecipient("user_payer", "PLAN_100");
     expect(retry.recipient.toLowerCase()).toBe(pay.recipient.toLowerCase());
-    expect(retry.positionId).toBe(pay.positionId);
-    store = await readStore();
-    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.id).toBe(beforeRoot?.id);
-    expect(reservedPosition(store.network_positions, "user_root", "PLAN_100")?.status).toBe("RESERVED");
 
     await finalizeConfirmedDirect2Placement("user_payer", "PLAN_100", "0xdirect2verify");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_right", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
-    expect(store.network_positions.find((p) => p.id === beforeRoot?.id)?.status).toBe("HISTORY");
-    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.id).toBe(reserved?.id);
-    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.status ?? "ACTIVE").toBe("ACTIVE");
+    expect(currentPosition(store.network_positions, "user_root", "PLAN_100")?.parent_id).toBe(
+      currentPosition(store.network_positions, "user_e8e1", "PLAN_100")?.id,
+    );
   });
 
   it("8–9. first-empty LEFT then RIGHT; ACTIVE+RESERVED occupy; HISTORY does not", async () => {
@@ -268,13 +253,10 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     expect(b.position).toBe("LEFT");
     expect(c.parent_id).toBe(a.id);
     expect(c.position).toBe("RIGHT");
-    const reservedA = reservedPosition((await readStore()).network_positions, "user_a", "PLAN_100");
-    expect(reservedA?.parent_id).toBe(b.id);
-    expect(reservedA?.position).toBe("LEFT");
+    expect(reservedPosition((await readStore()).network_positions, "user_a", "PLAN_100")).toBeNull();
     const d = await placeUser("user_d", "PLAN_100");
     expect(d.parent_id).toBe(b.id);
-    expect(d.position).toBe("RIGHT");
-    expect(occupiesSlot(reservedA!)).toBe(true);
+    expect(d.position).toBe("LEFT");
     await withStore((store) => {
       const hist = store.network_positions.find((p) => p.id === a.id)!;
       hist.status = "HISTORY";
@@ -339,9 +321,8 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     const pay = await resolvePlanRecipient("user_payer", "PLAN_ADMIN");
     expect(pay.recipientUserId).toBe("user_left");
     expect(pay.recipient.toLowerCase()).toBe(ADDR.E8E1);
-    const reserved = reservedPosition((await readStore()).network_positions, "user_root", "PLAN_ADMIN");
-    expect(reserved?.plan_id).toBe("PLAN_ADMIN");
-    expect(reserved?.funded_by_user_id).toBe("user_payer");
+    expect(reservedPosition((await readStore()).network_positions, "user_root", "PLAN_ADMIN")).toBeNull();
+    expect(reservedPosition((await readStore()).network_positions, "user_right", "PLAN_ADMIN")).toBeNull();
   });
 
   it("Direct #2 PREPARE only: no confirmed plan tx and no ACTIVE Global seat", async () => {
@@ -354,13 +335,14 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await placeUser("user_root", "PLAN_100");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
+    await confirmPlan("user_d1", ADDR.B);
 
     const pay = await resolvePlanRecipient("user_d2", "PLAN_100");
     expect(pay.slot).toBe(2);
     const store = await readStore();
     expect(store.transactions.filter((t) => t.user_id === "user_d2" && t.plan_id === "PLAN_100")).toHaveLength(0);
     expect(currentPosition(store.network_positions, "user_s", "PLAN_100")).toBeNull();
-    expect(reservedPosition(store.network_positions, "user_s", "PLAN_100")?.status).toBe("RESERVED");
+    expect(reservedPosition(store.network_positions, "user_s", "PLAN_100")).toBeNull();
     expect(store.network_positions.filter((p) => p.user_id === "user_s" && (p.status ?? "ACTIVE") === "ACTIVE")).toHaveLength(0);
   });
 
@@ -374,6 +356,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await placeUser("user_root", "PLAN_100");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
+    await confirmPlan("user_d1", ADDR.B);
     await resolvePlanRecipient("user_d2", "PLAN_100");
     await withStore((store) => {
       store.transactions.push({
@@ -414,6 +397,7 @@ describe("Direct #2 funds Global movement before recipient snapshot", () => {
     await placeUser("user_root", "PLAN_100");
     await assignSponsor("user_d1", "GXSPONSOR");
     await assignSponsor("user_d2", "GXSPONSOR");
+    await confirmPlan("user_d1", ADDR.B);
     await resolvePlanRecipient("user_d2", "PLAN_100");
     await confirmPlan("user_d2", ADDR.PAYER);
     await finalizeConfirmedDirect2Placement("user_d2", "PLAN_100", "seed_user_d2_PLAN_100");

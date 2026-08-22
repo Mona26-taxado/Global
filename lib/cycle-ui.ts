@@ -164,19 +164,17 @@ export function journeyCounts(steps: JourneyStep[]) {
   };
 }
 
-/** Live admin-tree seats: every ACTIVE + RESERVED row, keyed by position id (same user may appear twice). */
+/** Live admin-tree seats: ACTIVE rows only. Pending quotes do not occupy. */
 export function liveApiSeats(tree: NetNode[]): NetNode[] {
-  return tree.filter((n) => {
-    const st = n.status ?? "ACTIVE";
-    return st === "ACTIVE" || st === "RESERVED";
-  });
+  return tree.filter((n) => (n.status ?? "ACTIVE") === "ACTIVE");
 }
 
 export type ChildSlots = { left?: NetNode; right?: NetNode };
 
 function occupyRank(n: NetNode) {
   const st = n.status ?? "ACTIVE";
-  if (st === "ACTIVE" || st === "RESERVED") return 2;
+  if (st === "ACTIVE") return 2;
+  if (st === "RESERVED") return 0;
   return 1;
 }
 

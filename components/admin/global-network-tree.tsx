@@ -352,6 +352,15 @@ function MemberCard({
   );
 }
 
+export type PendingPlacement = {
+  id: string;
+  mover_user_id: string;
+  candidate_parent_position_id: string | null;
+  candidate_position: "LEFT" | "RIGHT" | null;
+  kind: string;
+  status: string;
+};
+
 export function GlobalNetworkTree({
   tree,
   users,
@@ -362,6 +371,7 @@ export function GlobalNetworkTree({
   error,
   onRetry,
   planId,
+  pendingPlacements = [],
 }: {
   tree: NetNode[];
   users: CycleUser[];
@@ -372,6 +382,7 @@ export function GlobalNetworkTree({
   error: boolean;
   onRetry: () => void;
   planId?: string;
+  pendingPlacements?: PendingPlacement[];
 }) {
   const [q, setQ] = useState("");
   const [levels, setLevels] = useState<3 | 5 | "all">("all");
@@ -815,10 +826,28 @@ export function GlobalNetworkTree({
           <p className="mt-1 max-w-2xl text-sm text-secondary">
             Existing confirmed positions remain unchanged. The live tree is one pyramid (root, then LEFT and RIGHT).
             Previous seats stay under that same LEFT/RIGHT as HISTORY / WAS — not beside the root. Current seats are ACTIVE.
-            Unpaid re-entry shows as RESERVED on the real next parent (first-empty: top to bottom, LEFT then RIGHT).
+            Current seats are ACTIVE only. Quoted unpaid placements are listed as pending — they do not occupy EMPTY slots
+            (first-empty: top to bottom, LEFT then RIGHT).
           </p>
         </div>
       </div>
+      {pendingPlacements.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {pendingPlacements.map((p) => {
+            const parent = displayTree.find((n) => n.id === p.candidate_parent_position_id);
+            const parentLabel = parent?.user?.referral_code ?? parent?.user_id ?? "upline";
+            return (
+              <div key={p.id} className="rounded-xl border border-dashed border-warning/50 bg-[#0B1220] px-3 py-2 text-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-warning">PENDING PLACEMENT</p>
+                <p className="text-cream">
+                  Candidate: {parentLabel}.{p.candidate_position ?? "ROOT"} · Payment required
+                </p>
+                <p className="text-[11px] text-mute">Does not occupy the live tree. EMPTY slots stay empty until confirmation.</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {searchNote && (
         <div className="mt-2 rounded-xl border border-line bg-[#0B1220] p-3 text-sm">
           <p className="text-secondary">{searchNote}</p>

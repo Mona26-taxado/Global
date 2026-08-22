@@ -150,6 +150,7 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(yPay.slot).toBe(1);
     expect(yPay.recipientUserId).toBe("user_x");
     expect(yPay.recipient.toLowerCase()).toBe(ADDR.X);
+    await confirmPlan("user_y", "Y");
 
     const zRef = await assignSponsor("user_z", "GXBBBBBB");
     expect(zRef.direct_number).toBe(2);
@@ -170,12 +171,13 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(bRef.direct_number).toBe(1);
     const bPay = await resolvePlanRecipient("user_b", "PLAN_100");
     expect(bPay.recipientUserId).toBe("user_y");
+    await confirmPlan("user_b", "B");
 
     const cRef = await assignSponsor("user_c", "GXCCCCCC");
     expect(cRef.direct_number).toBe(2);
     const cPay = await resolvePlanRecipient("user_c", "PLAN_100");
     expect(cPay.recipientUserId).toBe("user_x");
-    expect(cPay.positionId).toBe(reservedPosition((await readStore()).network_positions, "user_a")?.id);
+    expect(reservedPosition((await readStore()).network_positions, "user_a")).toBeNull();
     await finalizeConfirmedDirect2Placement("user_c", "PLAN_100", "0xcpay");
     store = await readStore();
     const ySeat = currentPosition(store.network_positions, "user_y");
@@ -184,12 +186,14 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(ySeat?.position).toBe("RIGHT");
     expect(yParent?.user_id).toBe("user_a");
     expect(aNow?.parent_id).toBe(currentPosition(store.network_positions, "user_x")?.id);
+    expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
 
     await confirmPlan("user_z", "Z");
     const dRef = await assignSponsor("user_d", "GXDDDDDD");
     expect(dRef.direct_number).toBe(1);
     const dPay = await resolvePlanRecipient("user_d", "PLAN_100");
     expect(dPay.recipientUserId).toBe("user_z");
+    await confirmPlan("user_d", "D");
 
     const eRef = await assignSponsor("user_e", "GXDDDDDD");
     expect(eRef.direct_number).toBe(2);
@@ -242,25 +246,16 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     expect(posY.parent_id).toBe(posA.id);
     expect(posY.position).toBe("RIGHT");
 
-    const reservedA = reservedPosition(store.network_positions, "user_a");
-    expect(reservedA?.status).toBe("RESERVED");
-    expect(reservedA?.parent_id).toBe(posX.id);
-    expect(reservedA?.position).toBe("LEFT");
-    expect(reservedA?.recipient_user_id).toBe("user_x");
-    expect(reservedA?.recipient_wallet?.toLowerCase()).toBe(ADDR.X);
-    expect(posA.status ?? "ACTIVE").toBe("ACTIVE");
-
     const payA = await resolveReentryPayment("user_a");
     expect(payA.recipientUserId).toBe("user_x");
     expect(payA.amountUsd).toBe(100);
-    expect(payA.positionId).toBe(reservedA?.id);
+    expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
+    expect(posA.status ?? "ACTIVE").toBe("ACTIVE");
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_a")?.id).toBe(posA.id);
-    expect(reservedPosition(store.network_positions, "user_a")?.status).toBe("RESERVED");
 
     await activateReservedReentry("user_a", "0xA-reenter");
     store = await readStore();
-    expect(currentPosition(store.network_positions, "user_a")?.id).toBe(reservedA?.id);
     expect(store.network_positions.find((p) => p.id === posA.id)?.status).toBe("HISTORY");
     expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
     expect(currentPosition(store.network_positions, "user_a")?.parent_id).toBe(posX.id);
@@ -346,60 +341,43 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await placeUser("user_x");
     await fillBothLegs("user_a", "user_x", "user_y");
 
-    const reserved = await qualifyForReentry("user_a");
-    expect(reserved?.status).toBe("RESERVED");
-    expect(reserved?.position).toBe("LEFT");
-    expect(reserved?.parent_id).toBe(currentPosition((await readStore()).network_positions, "user_x")?.id);
-    let store = await readStore();
-    expect(currentPosition(store.network_positions, "user_a")?.status ?? "ACTIVE").toBe("ACTIVE");
-    expect(reservedPosition(store.network_positions, "user_a")?.id).toBe(reserved?.id);
-    expect(currentPosition(store.network_positions, "user_a")?.id).not.toBe(reserved?.id);
-
+    await qualifyForReentry("user_a");
     const pay = await resolveReentryPayment("user_a");
     expect(pay.recipientRole).toBe("GLOBAL_REENTRY");
-    expect(pay.recipientUserId).toBe(reserved?.recipient_user_id);
-    expect(pay.recipient.toLowerCase()).toBe((reserved?.recipient_wallet ?? "").toLowerCase());
-    expect(pay.amountUsd).toBe(100);
     expect(pay.recipient.toLowerCase()).toBe(ADDR.X);
+    expect(pay.amountUsd).toBe(100);
     expect(pay.recipient.toLowerCase()).not.toBe(ADDR.A);
-
-    store = await readStore();
-    expect(currentPosition(store.network_positions, "user_a")?.status ?? "ACTIVE").toBe("ACTIVE");
-    expect(reservedPosition(store.network_positions, "user_a")?.status).toBe("RESERVED");
+    let store = await readStore();
+    const oldId = currentPosition(store.network_positions, "user_a")?.id;
+    expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
 
     const againPay = await resolveReentryPayment("user_a");
     expect(againPay.recipient.toLowerCase()).toBe(pay.recipient.toLowerCase());
-    expect(againPay.positionId).toBe(pay.positionId);
 
     await activateReservedReentry("user_a", "0xreentry1");
     store = await readStore();
     expect(reservedPosition(store.network_positions, "user_a")).toBeNull();
     const active = currentPosition(store.network_positions, "user_a");
     expect(active?.status ?? "ACTIVE").toBe("ACTIVE");
-    expect(active?.id).toBe(reserved?.id);
+    expect(active?.id).not.toBe(oldId);
     expect(active?.reentry_tx_hash).toBe("0xreentry1");
     const history = store.network_positions.filter((p) => p.user_id === "user_a" && p.status === "HISTORY");
     expect(history.length).toBe(1);
-    expect(history[0]?.id).not.toBe(active?.id);
+    expect(history[0]?.id).toBe(oldId);
 
     await activateReservedReentry("user_a", "0xreentry1");
     store = await readStore();
     expect(store.network_positions.filter((p) => p.user_id === "user_a" && (p.status ?? "ACTIVE") === "ACTIVE")).toHaveLength(1);
-    expect(store.network_positions.filter((p) => p.user_id === "user_a" && p.status === "RESERVED")).toHaveLength(0);
 
     await fillBothLegs("user_a", "user_l2", "user_r2");
-    const reserved2 = await qualifyForReentry("user_a");
-    expect(reserved2?.status).toBe("RESERVED");
-    expect(reserved2?.id).not.toBe(active?.id);
+    await qualifyForReentry("user_a");
     const pay2 = await resolveReentryPayment("user_a");
     expect(pay2.amountUsd).toBe(100);
-    expect(pay2.recipientUserId).toBe(reserved2?.recipient_user_id);
     store = await readStore();
     expect(currentPosition(store.network_positions, "user_a")?.id).toBe(active?.id);
     await activateReservedReentry("user_a", "0xreentry2");
     store = await readStore();
     expect(store.network_positions.filter((p) => p.user_id === "user_a" && p.status === "HISTORY")).toHaveLength(2);
-    expect(currentPosition(store.network_positions, "user_a")?.id).toBe(reserved2?.id);
     expect(currentPosition(store.network_positions, "user_a")?.reentry_tx_hash).toBe("0xreentry2");
   });
 
@@ -413,11 +391,13 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await placeUser("user_y");
     await qualifyForReentry("user_a");
     await withStore((store) => {
-      const row = reservedPosition(store.network_positions, "user_a")!;
-      row.recipient_user_id = "user_a";
-      row.recipient_wallet = ADDR.A;
+      const intent = store.payment_intents.find((i) => i.kind === "GLOBAL_REENTRY" && i.mover_user_id === "user_a" && i.status === "PENDING");
+      if (intent) {
+        intent.candidate_recipient_user_id = "user_a";
+        intent.candidate_recipient_wallet = ADDR.A;
+      }
     });
-    await expect(resolveReentryPayment("user_a")).rejects.toMatchObject({ code: "REENTRY_RECIPIENT_MISMATCH" });
+    await expect(activateReservedReentry("user_a", "0xself")).rejects.toMatchObject({ code: "REENTRY_SELF_PAY" });
   });
 
   it("blocks GLOBAL_REENTRY when the parent wallet is unverified and does not use a fallback", async () => {
@@ -428,13 +408,9 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
     await placeUser("user_a");
     await placeUser("user_x");
     await placeUser("user_y");
-    await qualifyForReentry("user_a");
     await withStore((store) => {
       const w = store.wallets.find((x) => x.user_id === "user_x")!;
       w.verified = false;
-      const row = reservedPosition(store.network_positions, "user_a")!;
-      row.recipient_wallet = null;
-      row.recipient_user_id = "user_x";
     });
     await expect(resolveReentryPayment("user_a")).rejects.toMatchObject({ code: "GLOBAL_UPLINE_WALLET_UNVERIFIED" });
   });

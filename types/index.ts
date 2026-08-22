@@ -100,6 +100,38 @@ export type TransactionRow = {
   global_parent_user_id?: string | null;
   position_id?: string | null;
   created_at: string;
+  intent_id?: string | null;
+  placement_status?: "OK" | "STALE_ROUTE" | "RECIPIENT_CHANGED" | null;
+};
+
+export type PaymentIntentKind = "DIRECT2_PLACEMENT" | "GLOBAL_REENTRY";
+
+export type PaymentIntentStatus = "PENDING" | "CONFIRMED" | "FAILED" | "CANCELLED" | "STALE_ROUTE";
+
+export type PaymentIntentRow = {
+  id: string;
+  kind: PaymentIntentKind;
+  status: PaymentIntentStatus;
+  buyer_user_id: string;
+  mover_user_id: string;
+  plan_id: string;
+  amount_usd: number;
+  candidate_parent_position_id: string | null;
+  candidate_position: "LEFT" | "RIGHT" | null;
+  candidate_depth: number;
+  candidate_recipient_user_id: string | null;
+  candidate_recipient_wallet: string | null;
+  movement_user_id?: string | null;
+  movement_from_position_id?: string | null;
+  movement_parent_position_id?: string | null;
+  movement_position?: "LEFT" | "RIGHT" | null;
+  movement_depth?: number | null;
+  movement_recipient_user_id?: string | null;
+  movement_recipient_wallet?: string | null;
+  skip_placement?: boolean;
+  quoted_at: string;
+  tx_hash?: string | null;
+  placement_status?: "OK" | "STALE_ROUTE" | "RECIPIENT_CHANGED" | "BLOCKED_STALE_ROUTE" | null;
 };
 
 export type NetworkPositionRow = {

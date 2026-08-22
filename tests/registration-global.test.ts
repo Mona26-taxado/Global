@@ -186,9 +186,8 @@ describe("$5 registration does not enter Global", () => {
 
     let store = await readStore();
     expect(currentPosition(store.network_positions, "user_s")).toBeNull();
-    expect(reservedPosition(store.network_positions, "user_s")?.parent_id).toBe(
-      currentPosition(store.network_positions, "user_root")?.id,
-    );
+    expect(reservedPosition(store.network_positions, "user_s")).toBeNull();
+    expect(store.payment_intents.some((i) => i.kind === "DIRECT2_PLACEMENT" && i.status === "PENDING")).toBe(true);
     expect(store.network_positions.filter((p) => p.user_id === "user_d2")).toHaveLength(0);
 
     await finalizeConfirmedDirect2Placement("user_d2", "PLAN_100", "0xd2confirm");

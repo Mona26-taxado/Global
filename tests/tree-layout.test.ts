@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { childSlotsByParent, displayForestSeats, layoutForestRoots, type NetNode } from "../lib/cycle-ui";
+import { childSlotsByParent, displayForestSeats, layoutForestRoots, liveApiSeats, type NetNode } from "../lib/cycle-ui";
 import {
   layoutBinaryForest,
   searchTreeSeats,
@@ -43,7 +43,7 @@ function toVis(node: NetNode, byParent: Map<string, { left?: NetNode; right?: Ne
 describe("admin binary tree layout", () => {
   const plan200: NetNode[] = [
     member("pos-root", "global", null, null, "ACTIVE"),
-    member("pos-rsv", "u24", "pos-root", "LEFT", "RESERVED"),
+    member("pos-left", "u24", "pos-root", "LEFT", "ACTIVE"),
     member("pos-e727", "ue727", "pos-root", "RIGHT", "ACTIVE"),
     member("pos-e8e1", "ue8e1", "pos-e727", "LEFT", "ACTIVE"),
   ];
@@ -52,7 +52,7 @@ describe("admin binary tree layout", () => {
     const vis = toVis(plan200[0]!, childSlotsByParent(plan200), new Set());
     const { placed } = layoutBinaryForest([vis]);
     const root = placed.find((p) => p.vis.node?.id === "pos-root")!;
-    const left = placed.find((p) => p.vis.node?.id === "pos-rsv")!;
+    const left = placed.find((p) => p.vis.node?.id === "pos-left")!;
     const right = placed.find((p) => p.vis.node?.id === "pos-e727")!;
     expect(left.x).toBeLessThan(root.x);
     expect(right.x).toBeGreaterThan(root.x);
@@ -60,24 +60,23 @@ describe("admin binary tree layout", () => {
     expect(left.y).toBeGreaterThan(root.y);
   });
 
-  it("keeps RESERVED in its API LEFT slot and EMPTY opposite an occupied child", () => {
+  it("does not let leftover RESERVED occupy a LEFT slot", () => {
     const vis = toVis(plan200[0]!, childSlotsByParent(plan200), new Set());
     const { placed } = layoutBinaryForest([vis]);
     const e727 = placed.find((p) => p.vis.node?.id === "pos-e727")!;
     const e8e1 = placed.find((p) => p.vis.node?.id === "pos-e8e1")!;
     const emptyR = placed.find((p) => p.vis.key === "pos-e727-empty-R")!;
-    expect(placed.find((p) => p.vis.node?.id === "pos-rsv")?.vis.node?.status).toBe("RESERVED");
+    expect(placed.find((p) => p.vis.node?.status === "RESERVED")).toBeUndefined();
     expect(e8e1.x).toBeLessThan(e727.x);
     expect(emptyR.x).toBeGreaterThan(e727.x);
-    expect(emptyR.y).toBe(e8e1.y);
     expect(emptyR.vis.kind).toBe("empty");
   });
 
-  it("lets ACTIVE and RESERVED coexist without converting status", () => {
+  it("lets ACTIVE children keep their status", () => {
     const vis = toVis(plan200[0]!, childSlotsByParent(plan200), new Set());
     const { placed } = layoutBinaryForest([vis]);
     expect(placed.find((p) => p.vis.node?.id === "pos-root")?.vis.node?.status).toBe("ACTIVE");
-    expect(placed.find((p) => p.vis.node?.id === "pos-rsv")?.vis.node?.status).toBe("RESERVED");
+    expect(placed.find((p) => p.vis.node?.id === "pos-left")?.vis.node?.status).toBe("ACTIVE");
     expect(placed.find((p) => p.vis.node?.id === "pos-e727")?.vis.node?.status).toBe("ACTIVE");
   });
 
@@ -155,8 +154,11 @@ describe("admin binary tree layout", () => {
       member("pos-e727", "e727", "pos-root", "RIGHT", "ACTIVE"),
       member("pos-ffe0", "ffe0", "pos-hist", "RIGHT", "ACTIVE"),
     ];
-    expect(layoutForestRoots(tree).map((r) => r.id)).toEqual(["pos-root"]);
-    expect(childSlotsByParent(tree).get("pos-root")?.left?.status).toBe("RESERVED");
+    const live = liveApiSeats(tree);
+    expect(live.map((n) => n.id).sort()).toEqual(["pos-e727", "pos-ffe0", "pos-root"]);
+    expect(layoutForestRoots(displayForestSeats(live, [])).some((r) => r.id === "pos-root")).toBe(true);
+    expect(childSlotsByParent(live).get("pos-root")?.left).toBeUndefined();
+    expect(childSlotsByParent(live).get("pos-root")?.right?.id).toBe("pos-e727");
     expect(visLayoutChildren({ key: "x", kind: "empty", position: "LEFT" })).toEqual([]);
   });
 });

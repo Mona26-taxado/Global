@@ -94,16 +94,14 @@ describe("buildPositionJourney", () => {
       { id: "pos-root-rsv", user_id: "root", parent_id: "pos-e8e1", position: "LEFT", depth: 2, status: "RESERVED" },
     ];
     const live = liveApiSeats(tree);
-    expect(live).toHaveLength(4);
-    expect(new Set(live.map((n) => n.id)).size).toBe(4);
-    expect(live.filter((n) => n.user_id === "root")).toHaveLength(2);
+    expect(live).toHaveLength(3);
+    expect(live.some((n) => n.status === "RESERVED")).toBe(false);
+    expect(live.filter((n) => n.user_id === "root")).toHaveLength(1);
     const roots = liveForestRoots(live);
     expect(roots.map((r) => r.id)).toEqual(["pos-root-active"]);
     const kids = childSlotsByParent(live);
     expect(kids.get("pos-root-active")?.left?.id).toBe("pos-e8e1");
-    expect(kids.get("pos-root-active")?.right?.id).toBe("pos-99ab");
-    expect(kids.get("pos-e8e1")?.left?.id).toBe("pos-root-rsv");
-    expect(kids.get("pos-e8e1")?.left?.status).toBe("RESERVED");
+    expect(kids.get("pos-e8e1")?.left).toBeUndefined();
   });
 
   it("walks stored HISTORY via from_position_id and does not invent missing seats", () => {
@@ -154,14 +152,14 @@ describe("buildPositionJourney", () => {
     const tree: NetNode[] = [
       { id: "pos-root", user_id: "global", parent_id: null, position: null, depth: 0, status: "ACTIVE" },
       { id: "pos-hist-left", user_id: "e8e1", parent_id: "pos-root", position: "LEFT", depth: 1, status: "HISTORY" },
-      { id: "pos-rsv-left", user_id: "99ab", parent_id: "pos-root", position: "LEFT", depth: 1, status: "RESERVED" },
+      { id: "pos-live-left", user_id: "99ab", parent_id: "pos-root", position: "LEFT", depth: 1, status: "ACTIVE" },
       { id: "pos-right", user_id: "e727", parent_id: "pos-root", position: "RIGHT", depth: 1, status: "ACTIVE" },
       { id: "pos-ffe0", user_id: "ffe0", parent_id: "pos-hist-left", position: "RIGHT", depth: 2, status: "ACTIVE" },
     ];
     expect(liveForestRoots(tree).map((r) => r.id).sort()).toEqual(["pos-hist-left", "pos-root"]);
     expect(layoutForestRoots(tree).map((r) => r.id)).toEqual(["pos-root"]);
     expect(displacedHistoryByParent(tree).get("pos-root")?.left?.id).toBe("pos-hist-left");
-    expect(childSlotsByParent(tree).get("pos-root")?.left?.id).toBe("pos-rsv-left");
+    expect(childSlotsByParent(tree).get("pos-root")?.left?.id).toBe("pos-live-left");
     expect(childSlotsByParent(tree).get("pos-hist-left")?.right?.id).toBe("pos-ffe0");
   });
 });

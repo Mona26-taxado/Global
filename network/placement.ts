@@ -7,10 +7,9 @@ export type Node = {
   status?: "ACTIVE" | "HISTORY" | "RESERVED";
 };
 
-/** Occupies a Global slot for placement (current seat or unpaid reserved re-entry). */
+/** Occupies a Global slot for allocation. ACTIVE only. RESERVED/HISTORY/intents do not occupy. */
 export function occupiesSlot(node: Node) {
-  const status = node.status ?? "ACTIVE";
-  return status === "ACTIVE" || status === "RESERVED";
+  return isActiveNode(node);
 }
 
 export function isActiveNode(node: Node) {
@@ -58,8 +57,8 @@ function makeHole(current: Node, position: "LEFT" | "RIGHT", userId: string): Ho
 
 /**
  * First empty Global seat: top → bottom, LEFT before RIGHT, whole plan tree.
- * Walk HISTORY for BFS order only. Holes attach under ACTIVE/RESERVED.
- * ACTIVE + RESERVED occupy; HISTORY does not.
+ * Walk HISTORY for BFS order only. Holes attach under ACTIVE.
+ * ACTIVE occupies; RESERVED, pending intents, and HISTORY do not.
  */
 export function findFirstEmptyPlacement(nodes: Node[], userId: string): Hole {
   const occupying = liveNodes(nodes);
