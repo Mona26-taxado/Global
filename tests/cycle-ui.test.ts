@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { binaryPyramidSeats, buildPositionJourney, childSlotsByParent, displayForestSeats, displacedHistoryByParent, journeyCounts, layoutForestRoots, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, displacedHistoryByParent, journeyCounts, layoutForestRoots, liveApiSeats, liveForestRoots, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "../lib/cycle-ui";
 
 describe("payment route labels", () => {
   it("maps Direct #1 / Direct #2 / re-entry to locked UI names", () => {
@@ -163,29 +163,6 @@ describe("buildPositionJourney", () => {
     expect(displacedHistoryByParent(tree).get("pos-root")?.left?.id).toBe("pos-hist-left");
     expect(childSlotsByParent(tree).get("pos-root")?.left?.id).toBe("pos-rsv-left");
     expect(childSlotsByParent(tree).get("pos-hist-left")?.right?.id).toBe("pos-ffe0");
-  });
-
-  it("binary pyramid is one ACTIVE root with LEFT/RIGHT only — no HISTORY chain, no second ROOT", () => {
-    const all: NetNode[] = [
-      { id: "pos-root", user_id: "global", parent_id: null, position: null, depth: 0, status: "ACTIVE" },
-      { id: "pos-hist-left", user_id: "e8e1", parent_id: "pos-root", position: "LEFT", depth: 1, status: "HISTORY" },
-      { id: "pos-rsv-left", user_id: "99ab", parent_id: "pos-root", position: "LEFT", depth: 1, status: "RESERVED" },
-      { id: "pos-right", user_id: "e727", parent_id: "pos-root", position: "RIGHT", depth: 1, status: "ACTIVE" },
-      { id: "pos-e8e1-now", user_id: "e8e1", parent_id: "pos-right", position: "LEFT", depth: 2, status: "ACTIVE" },
-      { id: "pos-global-rsv", user_id: "global", parent_id: "pos-hist-left", position: "LEFT", depth: 2, status: "RESERVED" },
-      { id: "pos-ffe0", user_id: "ffe0", parent_id: "pos-hist-left", position: "RIGHT", depth: 2, status: "ACTIVE" },
-    ];
-    const live = liveApiSeats(all);
-    const pyramid = binaryPyramidSeats(live, all);
-    expect(pyramid.every((n) => n.status !== "HISTORY")).toBe(true);
-    expect(layoutForestRoots(pyramid).map((r) => r.id)).toEqual(["pos-root"]);
-    const kids = childSlotsByParent(pyramid);
-    expect(kids.get("pos-root")?.left?.id).toBe("pos-rsv-left");
-    expect(kids.get("pos-root")?.right?.id).toBe("pos-right");
-    expect(kids.get("pos-right")?.left?.id).toBe("pos-e8e1-now");
-    expect(kids.get("pos-e8e1-now")?.left?.id).toBe("pos-global-rsv");
-    expect(kids.get("pos-e8e1-now")?.right?.id).toBe("pos-ffe0");
-    expect(pyramid.filter((n) => !n.parent_id)).toHaveLength(1);
   });
 });
 

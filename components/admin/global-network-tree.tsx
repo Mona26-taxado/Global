@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { formatTokenAmount } from "@/components/ui/data-list";
 import { occupyingSeatsAfterEarlierHole, type Node as PlacementNode } from "@/network/placement";
-import { binaryPyramidSeats, buildPositionJourney, childSlotsByParent, displayForestSeats, journeyCounts, layoutForestRoots, liveApiSeats, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
+import { buildPositionJourney, childSlotsByParent, displayForestSeats, displacedHistoryByParent, journeyCounts, layoutForestRoots, liveApiSeats, parentOf, previousHistoryChain, routingLabel, type JourneyPosition, type NetNode } from "@/lib/cycle-ui";
 import { explorerTxUrl } from "@/lib/network-config";
 import {
   TREE_MAX_SCALE,
@@ -76,6 +76,8 @@ type VisNode = {
   node?: NetNode;
   left?: VisNode;
   right?: VisNode;
+  /** Old HISTORY seat that occupied this LEFT/RIGHT before the live winner. */
+  was?: VisNode;
 };
 
 type Placed = { vis: VisNode; x: number; y: number };
@@ -103,6 +105,7 @@ function initials(code?: string) {
 function toVis(
   node: NetNode,
   byParent: Map<string, { left?: NetNode; right?: NetNode }>,
+  displaced: Map<string, { left?: NetNode; right?: NetNode }>,
   depth: number,
   maxDepth: number,
   visited: Set<string>,
@@ -116,17 +119,28 @@ function toVis(
   if (visited.has(node.id)) return vis;
   visited.add(node.id);
   if (maxDepth !== Infinity && depth >= maxDepth) return vis;
+  const loser =
+    node.position === "LEFT"
+      ? displaced.get(node.parent_id ?? "")?.left
+      : node.position === "RIGHT"
+        ? displaced.get(node.parent_id ?? "")?.right
+        : undefined;
+  if (loser && loser.id !== node.id) {
+    vis.was = toVis(loser, byParent, displaced, depth + 1, maxDepth, visited);
+    return vis;
+  }
   const kids = byParent.get(node.id) ?? {};
   vis.left = kids.left
-    ? toVis(kids.left, byParent, depth + 1, maxDepth, visited)
+    ? toVis(kids.left, byParent, displaced, depth + 1, maxDepth, visited)
     : { key: `${node.id}-empty-L`, kind: "empty", position: "LEFT" };
   vis.right = kids.right
-    ? toVis(kids.right, byParent, depth + 1, maxDepth, visited)
+    ? toVis(kids.right, byParent, displaced, depth + 1, maxDepth, visited)
     : { key: `${node.id}-empty-R`, kind: "empty", position: "RIGHT" };
   return vis;
 }
 
 function measure(v: VisNode): number {
+  if (v.was) return Math.max(NODE_W, measure(v.was));
   if (!v.left && !v.right) return NODE_W;
   const lw = v.left ? measure(v.left) : 0;
   const rw = v.right ? measure(v.right) : 0;
@@ -135,12 +149,17 @@ function measure(v: VisNode): number {
 }
 
 function visLayoutChildren(v: VisNode): VisNode[] {
+  if (v.was) return [v.was];
   return [v.left, v.right].filter((c): c is VisNode => Boolean(c));
 }
 
 function place(v: VisNode, originX: number, depth: number, out: Placed[]) {
   const w = measure(v);
   out.push({ vis: v, x: originX + w / 2, y: depth * (NODE_H + V_GAP) });
+  if (v.was) {
+    place(v.was, originX, depth + 1, out);
+    return;
+  }
   const lw = v.left ? measure(v.left) : 0;
   if (v.left) place(v.left, originX, depth + 1, out);
   if (v.right) place(v.right, originX + lw + (v.left ? H_GAP : 0), depth + 1, out);
@@ -292,7 +311,7 @@ function MemberCard({
   const node = placed.vis.node!;
   const reserved = statusOf(node) === "RESERVED";
   const history = statusOf(node) === "HISTORY";
-  const isRoot = !node.parent_id && !reserved && !history;
+  const isRoot = (!node.parent_id && !reserved) || Boolean(showAsRoot && reserved);
   const code = node.user?.referral_code ?? shortAddr(node.user_id);
   const tail = walletTail(user?.wallet);
   const label = isRoot || (history && !node.parent_id) ? "ROOT" : reserved ? code : history ? code : tail ?? code;
@@ -405,7 +424,6 @@ export function GlobalNetworkTree({
   const liveTree = useMemo(() => liveApiSeats(tree), [tree]);
   const allHistoryRows = useMemo(() => [...historyByUser.values()].flat(), [historyByUser]);
   const displayTree = useMemo(() => displayForestSeats(liveTree, allHistoryRows), [liveTree, allHistoryRows]);
-  const pyramidTree = useMemo(() => binaryPyramidSeats(liveTree, displayTree), [liveTree, displayTree]);
   const legacyIds = useMemo(() => {
     const nodes: PlacementNode[] = displayTree.map((n) => ({
       id: n.id,
@@ -417,14 +435,19 @@ export function GlobalNetworkTree({
     }));
     return occupyingSeatsAfterEarlierHole(nodes);
   }, [displayTree]);
+  const activeRootUserIds = useMemo(
+    () => new Set(liveTree.filter((n) => !n.parent_id && (n.status ?? "ACTIVE") === "ACTIVE").map((n) => n.user_id)),
+    [liveTree],
+  );
   const maxDepth = levels === "all" ? Infinity : levels;
-  const roots = useMemo(() => layoutForestRoots(pyramidTree), [pyramidTree]);
+  const roots = useMemo(() => layoutForestRoots(displayTree), [displayTree]);
 
   const visRoots = useMemo(() => {
-    const byParent = childSlotsByParent(pyramidTree);
+    const byParent = childSlotsByParent(displayTree);
+    const displaced = displacedHistoryByParent(displayTree);
     const visited = new Set<string>();
-    return roots.map((r) => toVis(r, byParent, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
-  }, [pyramidTree, roots, maxDepth]);
+    return roots.map((r) => toVis(r, byParent, displaced, 0, maxDepth === Infinity ? 99 : maxDepth - 1, visited));
+  }, [displayTree, roots, maxDepth]);
 
   const placed = useMemo(() => {
     const out: Placed[] = [];
@@ -818,7 +841,9 @@ export function GlobalNetworkTree({
           <p className="text-[11px] uppercase tracking-[0.18em] text-mute">Network</p>
           <h2 className="mt-1 font-display text-[28px] leading-8 text-cream sm:text-[32px]">Global Network Tree</h2>
           <p className="mt-1 max-w-2xl text-sm text-secondary">
-            One live root at the top, then LEFT and RIGHT (two seats), then two under each. HISTORY stays in the side journey, not beside or under the root as a second tree.
+            Existing confirmed positions remain unchanged. The live tree is one pyramid (root, then LEFT and RIGHT).
+            Previous seats stay under that same LEFT/RIGHT as HISTORY / WAS — not beside the root. Current seats are ACTIVE.
+            Unpaid re-entry shows as RESERVED on the real next parent (first-empty: top to bottom, LEFT then RIGHT).
           </p>
         </div>
       </div>
@@ -1013,7 +1038,14 @@ export function GlobalNetworkTree({
                           user={p.vis.node ? userById.get(p.vis.node.user_id) : undefined}
                           onSelect={() => p.vis.node && selectNode(p.vis.node)}
                           planId={planId}
-                          showAsRoot={Boolean(p.vis.node && !p.vis.node.parent_id && statusOf(p.vis.node) === "ACTIVE")}
+                          showAsRoot={Boolean(
+                            p.vis.node &&
+                              (activeRootUserIds.has(p.vis.node.user_id) ||
+                                liveTree.some((n) => n.id === p.vis.node?.from_position_id && !n.parent_id) ||
+                                previousHistoryChain(p.vis.node, historyByUser.get(p.vis.node.user_id) ?? []).some(
+                                  (h) => !h.parent_id && statusOf(p.vis.node) === "RESERVED",
+                                )),
+                          )}
                           phase={
                             p.vis.node?.status === "RESERVED"
                               ? "next"

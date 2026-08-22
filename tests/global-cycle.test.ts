@@ -153,7 +153,6 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
 
     const zRef = await assignSponsor("user_z", "GXBBBBBB");
     expect(zRef.direct_number).toBe(2);
-    await confirmPlan("user_y", "Y");
     const zPay = await resolvePlanRecipient("user_z", "PLAN_100");
     expect(zPay.slot).toBe(2);
     expect(zPay.recipientUserId).toBe("user_a");
@@ -174,7 +173,6 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
 
     const cRef = await assignSponsor("user_c", "GXCCCCCC");
     expect(cRef.direct_number).toBe(2);
-    await confirmPlan("user_b", "B");
     const cPay = await resolvePlanRecipient("user_c", "PLAN_100");
     expect(cPay.recipientUserId).toBe("user_x");
     expect(cPay.positionId).toBe(reservedPosition((await readStore()).network_positions, "user_a")?.id);
@@ -195,7 +193,6 @@ describe("GLOBAL X Direct #1 / Direct #2 cycle", () => {
 
     const eRef = await assignSponsor("user_e", "GXDDDDDD");
     expect(eRef.direct_number).toBe(2);
-    await confirmPlan("user_d", "D");
     const ePay = await resolvePlanRecipient("user_e", "PLAN_100");
     expect(ePay.recipientUserId).toBe("user_y");
     await finalizeConfirmedDirect2Placement("user_e", "PLAN_100", "0xepay");
