@@ -2,6 +2,7 @@ import { genesisReferralCode, genesisWalletAddress } from "@/lib/network-config"
 import { newId } from "@/lib/store";
 import type { Store } from "@/lib/store";
 import { cycleComplete, findFirstEmptyPlacement, isActiveNode, isForestRoot, placementRoots } from "@/network/placement";
+import { afterActiveSeatCreated } from "@/services/placement-intent";
 import { occupyingPosition, positionsForPlan } from "@/services/users";
 import type { NetworkPositionRow, PaymentIntentRow, TransactionRow, UserRow } from "@/types";
 
@@ -236,5 +237,6 @@ export function applyGenesisReconciliation(
     source: ADMIN_GENESIS_RECONCILIATION,
   };
   store.network_positions.push(row);
+  afterActiveSeatCreated(store, row);
   return row;
 }

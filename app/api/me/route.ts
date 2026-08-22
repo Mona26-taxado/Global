@@ -4,6 +4,7 @@ import { readStore } from "@/lib/store";
 import { getRegistration, listUserPlans, retryPendingRegistration } from "@/payments/service";
 import { appUrl } from "@/lib/network-config";
 import { cycleComplete, currentPosition, reservedPosition } from "@/services/users";
+import { findPendingIntent } from "@/services/placement-intent";
 import { hasConfirmedPlan, orderedPlans } from "@/lib/plan-progress";
 
 export async function GET() {
@@ -32,19 +33,19 @@ export async function GET() {
     .map((p) => {
       const reserved = reservedPosition(store.network_positions, user.id, p.id);
       const currentPos = currentPosition(store.network_positions, user.id, p.id);
-      const parentUser = reserved?.recipient_user_id
-        ? store.users.find((u) => u.id === reserved.recipient_user_id)
-        : null;
+      const intent = findPendingIntent(store, "GLOBAL_REENTRY", user.id, p.id);
+      const parentUserId = reserved?.recipient_user_id ?? intent?.candidate_recipient_user_id ?? null;
+      const parentUser = parentUserId ? store.users.find((u) => u.id === parentUserId) : null;
       return {
         required: true,
-        reserved: Boolean(reserved),
+        reserved: Boolean(reserved) || Boolean(intent),
         plan_id: p.id,
         plan_code: p.code,
-        position_id: reserved?.id ?? null,
-        position: reserved?.position ?? null,
-        global_parent_user_id: reserved?.recipient_user_id ?? null,
+        position_id: reserved?.id ?? intent?.candidate_parent_position_id ?? null,
+        position: reserved?.position ?? intent?.candidate_position ?? null,
+        global_parent_user_id: parentUserId,
         global_parent_code: parentUser?.referral_code ?? null,
-        recipient_wallet: reserved?.recipient_wallet ?? null,
+        recipient_wallet: reserved?.recipient_wallet ?? intent?.candidate_recipient_wallet ?? null,
         amount_usd: p.amount_usd,
         legs_complete: Boolean(
           currentPos && cycleComplete(store.network_positions.filter((n) => n.plan_id === p.id), currentPos.id),

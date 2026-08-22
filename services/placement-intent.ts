@@ -375,13 +375,14 @@ export function confirmDirect2FromIntent(
     depth: intent.candidate_depth,
   }, { funded_by_user_id: buyerId });
 
+  let moved: NetworkPositionRow | null = null;
   if (intent.movement_user_id && intent.movement_from_position_id && intent.movement_parent_position_id && movementNow) {
     const old = store.network_positions.find((p) => p.id === intent.movement_from_position_id);
     if (old && (old.status ?? "ACTIVE") === "ACTIVE") {
       old.status = "HISTORY";
       old.ended_at = nowIso();
     }
-    insertActiveExact(
+    moved = insertActiveExact(
       store,
       intent.movement_user_id,
       planId,
@@ -398,13 +399,27 @@ export function confirmDirect2FromIntent(
         funded_by_user_id: buyerId,
       },
     );
-  } else {
-    maybeQueueAncestorReentryIntents(store, placed);
   }
 
   intent.status = "CONFIRMED";
   intent.placement_status = "OK";
+  afterActiveSeatCreated(store, placed);
+  if (moved) afterActiveSeatCreated(store, moved);
   return { placed, intent };
+}
+
+function cycleAlreadyFunded(store: StoreShape, planId: string, fromPositionId: string) {
+  return (store.payment_intents ?? []).some(
+    (i) =>
+      i.plan_id === planId &&
+      i.movement_from_position_id === fromPositionId &&
+      (i.status === "CONFIRMED" || (i.status === "PENDING" && i.kind === "DIRECT2_PLACEMENT")),
+  );
+}
+
+/** After any ACTIVE child insert (never PREPARE). Quotes re-entry for newly completed ancestors. */
+export function afterActiveSeatCreated(store: StoreShape, child: NetworkPositionRow) {
+  maybeQueueAncestorReentryIntents(store, child);
 }
 
 export function maybeQueueAncestorReentryIntents(store: StoreShape, child: NetworkPositionRow) {
@@ -414,23 +429,35 @@ export function maybeQueueAncestorReentryIntents(store: StoreShape, child: Netwo
     if (!parentPos) return;
     if ((parentPos.status ?? "ACTIVE") === "ACTIVE") {
       const scoped = positionsForPlan(store.network_positions, child.plan_id);
-      if (cycleComplete(scoped, parentPos.id)) {
-        const funded = (store.payment_intents ?? []).some(
-          (i) =>
-            i.status === "CONFIRMED" &&
-            i.plan_id === child.plan_id &&
-            i.movement_from_position_id === parentPos.id,
-        );
-        if (!funded) {
-          try {
-            quoteReentryInStore(store, parentPos.user_id, child.plan_id);
-          } catch {
-            /* upline wallet missing: eligibility still via cycleComplete */
-          }
+      if (cycleComplete(scoped, parentPos.id) && !cycleAlreadyFunded(store, child.plan_id, parentPos.id)) {
+        try {
+          quoteReentryInStore(store, parentPos.user_id, child.plan_id);
+        } catch {
+          /* upline wallet missing: eligibility still via cycleComplete */
         }
       }
     }
     parentId = parentPos.parent_id;
+  }
+}
+
+/** Backfill: every ACTIVE seat whose immediate LEFT+RIGHT are ACTIVE gets one pending quote. */
+export function syncReentryQuotesForCompletedCycles(store: StoreShape, planId?: string) {
+  const planIds = planId
+    ? [planId]
+    : [...new Set(store.network_positions.map((p) => p.plan_id))];
+  for (const pid of planIds) {
+    const scoped = positionsForPlan(store.network_positions, pid);
+    for (const seat of scoped) {
+      if ((seat.status ?? "ACTIVE") !== "ACTIVE") continue;
+      if (!cycleComplete(scoped, seat.id)) continue;
+      if (cycleAlreadyFunded(store, pid, seat.id)) continue;
+      try {
+        quoteReentryInStore(store, seat.user_id, pid);
+      } catch {
+        /* same as ancestor queue */
+      }
+    }
   }
 }
 
@@ -446,9 +473,7 @@ export function quoteReentryInStore(store: StoreShape, userId: string, planId: s
       "This member has not completed both Global legs, so re-entry payment is not required.",
     );
   }
-  const funded = (store.payment_intents ?? []).some(
-    (i) => i.status === "CONFIRMED" && i.plan_id === planId && i.movement_from_position_id === current.id,
-  );
+  const funded = cycleAlreadyFunded(store, planId, current.id);
   if (funded) {
     throw new PlacementError(
       "REENTRY_FUNDED_BY_DIRECT2",
@@ -554,7 +579,7 @@ export function confirmReentryFromIntent(
   );
   intent.status = "CONFIRMED";
   intent.placement_status = "OK";
-  maybeQueueAncestorReentryIntents(store, placed);
+  afterActiveSeatCreated(store, placed);
   return placed;
 }
 

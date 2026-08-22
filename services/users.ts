@@ -4,12 +4,12 @@ import type { Store as StoreShape } from "@/lib/store";
 import type { NetworkPositionRow, ReferralRow, UserRow } from "@/types";
 import { basePlan } from "@/lib/plan-progress";
 import {
+  afterActiveSeatCreated,
   confirmDirect2FromIntent,
   confirmReentryFromIntent,
   failPendingIntents,
   findPendingIntent,
   intentPayee,
-  maybeQueueAncestorReentryIntents,
   pendingPlacementsForPlan,
   quoteDirect2InStore,
   quoteReentryInStore,
@@ -221,7 +221,7 @@ export function activateReservedReentryInStore(store: StoreShape, userId: string
 }
 
 function maybeReenterAncestors(store: StoreShape, child: NetworkPositionRow) {
-  maybeQueueAncestorReentryIntents(store, child);
+  afterActiveSeatCreated(store, child);
 }
 
 /** Direct #2 PREPARE: quote only. Never inserts a network_position. */
